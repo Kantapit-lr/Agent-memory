@@ -2,20 +2,16 @@ import requests
 from embed_manager import get_embedding_model
 import json
 
-# 1. ตั้งค่าพื้นฐาน
 base_url = "https://urging-overboard-generic.ngrok-free.dev"
 headers = {"ngrok-skip-browser-warning": "true"}
 
-# 2. ตั้งคำถามที่เราอยากค้นหา
 user_question = "What is Bamboo Diplomacy?"
 print(f"คำถาม: '{user_question}'")
 
-# 3. แปลงคำถามให้เป็น Vector 3072 มิติ (สมอง AI)
 print("กำลังแปลงคำถามเป็น Vector...")
 embed_model = get_embedding_model()
 question_vector = embed_model.embed_query(user_question)
 
-# 4. ยิง Vector คำถามไปให้เพื่อนค้นหา (ใช้ API /search)
 search_payload = {
     "query_embedding": question_vector, 
     "limit": 2 

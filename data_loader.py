@@ -21,7 +21,6 @@ def load_data_from_website(url: str):
     """
     print(f"กำลังดูดข้อมูลจากเว็บไซต์: {url}")
     
-    # ดึงแค่ หัวข้อใหญ่ๆ และ ย่อหน้าเนื้อหา
     custom_strainer = bs4.SoupStrainer(["p", "h1", "h2", "h3"])
     
     loader = WebBaseLoader(
@@ -40,14 +39,14 @@ if __name__ == "__main__":
     print("--- ทดสอบระบบดูดข้อมูล ---")
     
     # 🔴ทดสอบ Website
-    # sample_url = "https://en.wikipedia.org/wiki/Bamboo_diplomacy"
-    # web_text = load_data_from_website(sample_url)
-    # print(f"ดูดข้อความจากเว็บสำเร็จ! ความยาว: {len(web_text)} ตัวอักษร")
-    # print(f"ตัวอย่างข้อความ:\n {web_text[:300]}...\n")
+    sample_url = "https://en.wikipedia.org/wiki/Bamboo_diplomacy"
+    web_text = load_data_from_website(sample_url)
+    print(f"ดูดข้อความจากเว็บสำเร็จ! ความยาว: {len(web_text)} ตัวอักษร")
+    print(f"ตัวอย่างข้อความ:\n {web_text[:300]}...\n")
 
     # 🔵ทดสอบ PDF
-    sample_pdf = "lumira_profile.pdf" 
-    pdf_text = load_data_from_pdf(sample_pdf)
+    # sample_pdf = "lumira_profile.pdf" 
+    # pdf_text = load_data_from_pdf(sample_pdf)
     
-    print(f"\nดูดข้อความจาก PDF สำเร็จ! ความยาว: {len(pdf_text)} ตัวอักษร")
-    print(f"ตัวอย่างข้อความ:\n{pdf_text[:300]}...")
+    # print(f"\nดูดข้อความจาก PDF สำเร็จ! ความยาว: {len(pdf_text)} ตัวอักษร")
+    # print(f"ตัวอย่างข้อความ:\n{pdf_text[:300]}...")

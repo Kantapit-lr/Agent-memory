@@ -52,7 +52,7 @@ def extract_graph_data(text_chunk: str):
     try:
         result = chain.invoke({"text": text_chunk})
         
-        clean_result = result.strip() # ไม่ต้องมี .content แล้ว
+        clean_result = result.strip()
 
         if clean_result.startswith("```json"):
             clean_result = clean_result[7:-3].strip()
