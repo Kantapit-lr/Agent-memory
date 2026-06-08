@@ -30,6 +30,10 @@ class EmbeddingInput(BaseModel):
     chunk_text: str
     embedding: list[float]
 
+class SearchInput(BaseModel):
+    query_embedding: list[float]
+    limit: int = 5
+
 # API บันทึก document
 @app.post("/documents")
 def add_document(doc: DocumentInput):
@@ -54,11 +58,11 @@ def add_embedding(data: EmbeddingInput):
 
 # API ค้นหา vector
 @app.post("/search")
-def search(query_embedding: list[float], limit: int = 5):
+def search(data: SearchInput):
     with conn.cursor() as cur:
         cur.execute(
             "SELECT chunk_text FROM embeddings ORDER BY embedding <=> %s LIMIT %s",
-            (query_embedding, limit)
+            (data.query_embedding, data.limit)
         )
         results = cur.fetchall()
         return {"results": [r[0] for r in results]}
