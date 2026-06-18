@@ -6,21 +6,35 @@ export function calculateCosineSimilarity(vecA: number[], vecB: number[]): numbe
   let normB = 0;
 
   for (let i = 0; i < vecA.length; i++) {
-    const a = vecA[i] || 0; 
-    const b = vecB[i] || 0; 
+    const valA = vecA[i] || 0;
+    const valB = vecB[i] || 0;
 
-    dotProduct += a * b;
-    normA += a * a;
-    normB += b * b;
+    dotProduct += valA * valB;
+    normA += valA * valA;
+    normB += valB * valB;
   }
 
+  normA = Math.sqrt(normA);
+  normB = Math.sqrt(normB);
+
   if (normA === 0 || normB === 0) return 0;
-  
-  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+
+  const similarity = dotProduct / (normA * normB);
+
+  console.log(`      📊 [Math] Dot Product (A·B): ${dotProduct.toFixed(4)}`);
+  console.log(`      📊 [Math] Magnitude A (||A||): ${normA.toFixed(4)}`);
+  console.log(`      📊 [Math] Magnitude B (||B||): ${normB.toFixed(4)}`);
+  console.log(`      📊 [Math] สูตร: ${dotProduct.toFixed(4)} / (${normA.toFixed(4)} * ${normB.toFixed(4)})`);
+  console.log(`      🔍 [Resolution] ผลลัพธ์ความเหมือน: ${(similarity * 100).toFixed(2)}%`);
+
+  return similarity;
 }
 
-export function isDuplicateEntity(newEmbedding: number[], existingEmbedding: number[], threshold = 0.85): boolean {
-  const similarityScore = calculateCosineSimilarity(newEmbedding, existingEmbedding);
-  console.log(`🔍 [Resolution] เทียบความเหมือนได้: ${(similarityScore * 100).toFixed(2)}%`);
-  return similarityScore >= threshold;
+export function isDuplicateEntity(
+  newEmbedding: number[],
+  existingEmbedding: number[],
+  threshold: number = 0.85
+): boolean {
+  const similarity = calculateCosineSimilarity(newEmbedding, existingEmbedding);
+  return similarity >= threshold;
 }
