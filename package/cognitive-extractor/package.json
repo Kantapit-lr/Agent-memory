@@ -15,7 +15,7 @@
     "dotenv": "^17.4.2",
     "elysia": "^1.4.29",
     "groq-sdk": "^1.2.1",
-    "storage-adapter": "../storage-adapter",
+    "storage-adapter": "../adapter",
     "zod": "^4.4.3",
     "zod-to-json-schema": "^3.25.2"
   }
