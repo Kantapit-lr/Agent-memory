@@ -3,11 +3,11 @@ import { extractGraphData } from "./extractor";
 import { generateEmbeddings } from "./vector";
 import { chunkText } from "./chunker"; 
 
-import { saveOrganization } from "../../storage-adapter/src/repositories/nodes/saveOrganization";
-import { saveEntity } from "../../storage-adapter/src/repositories/nodes/saveEntity";
-import { saveDocument } from "../../storage-adapter/src/repositories/nodes/saveDocument";
-import { saveChunk } from "../../storage-adapter/src/repositories/nodes/saveChunk";
-import { syncRelationship } from "../../storage-adapter/src/repositories/semantic";
+import { saveOrganization } from "../../adapter/src/repositories/nodes/saveOrganization";
+import { saveEntity } from "../../adapter/src/repositories/nodes/saveEntity";
+import { saveDocument } from "../../adapter/src/repositories/nodes/saveDocument";
+import { saveChunk } from "../../adapter/src/repositories/nodes/saveChunk";
+import { syncRelationship } from "../../adapter/src/repositories/semantic";
 
 const app = new Elysia();
 
