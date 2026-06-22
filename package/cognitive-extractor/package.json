@@ -17,7 +17,7 @@
     "groq-sdk": "^1.2.1",
     "neo4j-driver": "^6.1.0",
     "pdf-parse": "^2.4.5",
-    "storage-adapter": "../storage-adapter",
+    "storage-adapter": "../adapter",
     "zod": "^4.4.3",
     "zod-to-json-schema": "^3.25.2"
   }
