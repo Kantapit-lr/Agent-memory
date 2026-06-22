@@ -1,19 +1,16 @@
-import Anthropic from "@anthropic-ai/sdk";
-import { generateEmbeddings } from "./vector";
-import { extractTextFromDocument } from "./docling";
-import { isDuplicateEntity } from "./resolution";
+import OpenAI from "openai";
 import "dotenv/config";
 
-const anthropic = new Anthropic({ 
-  apiKey: process.env.ANTHROPIC_API_KEY || "dummy_key_for_mocking_mode" 
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+  baseURL: process.env.OPENAI_BASE_URL,
 });
 
 export async function extractGraphData(text: string, organizationId: string) {
-  //โหมดจำลอง
   if (process.env.USE_MOCK_AI === "true") {
-    console.log("⚠️ [MOCK MODE] กำลังจำลองผลลัพธ์การสกัดข้อมูลจาก Claude 3.5 Sonnet...");
-    
-    await new Promise(resolve => setTimeout(resolve, 1000)); 
+    console.log("⚠️ [MOCK MODE] กำลังจำลองผลลัพธ์การสกัดข้อมูล...");
+
+    await new Promise(resolve => setTimeout(resolve, 1000));
 
     return JSON.stringify({
       "entities": [
@@ -52,7 +49,6 @@ export async function extractGraphData(text: string, organizationId: string) {
     });
   }
 
-  //โหมดใช้งานจริง (ยิงเข้า Claude 3.5 Sonnet)
   const systemPrompt = `You are a Cognitive 4D Memory Extractor for an Enterprise Architecture.
 Extract entities and relationships from the text and output ONLY valid JSON.
 
@@ -85,80 +81,18 @@ CRITICAL RULES:
 4. INTENT CATEGORY: MUST be one of "FACT", "POLICY", "DECISION", "OPINION", or "TASK".
 5. CLEAN OUTPUT: DO NOT wrap the JSON in markdown blocks. Output ONLY raw JSON text.`;
 
-  const msg = await anthropic.messages.create({
-    model: "claude-3-5-sonnet-20241022",
-    max_tokens: 4000,
-    temperature: 0.1, // บังคับให้ Claude ตอบตรงเป๊ะ ไม่มั่ว
-    system: systemPrompt,
+  const response = await openai.chat.completions.create({
+    model: "anthropic/claude-sonnet-4-6",
+    temperature: 0.1,
     messages: [
-      {
-        role: "user",
-        content: `Text to analyze: "${text}"`
-      }
+      { role: "system", content: systemPrompt },
+      { role: "user", content: `Text to analyze: "${text}"` }
     ]
   });
 
-  let jsonString = "";
-  const firstContent = msg.content?.[0];
-  
-  if (firstContent && firstContent.type === 'text') {
-    jsonString = firstContent.text;
-  }
-
-  // เคลียร์ Markdown (เผื่อ Claude แอบใส่ ```json มาให้)
+  let jsonString = response.choices?.[0]?.message?.content || "";
   jsonString = jsonString.replace(/```json/g, "").replace(/```/g, "").trim();
+  console.log(`✅ [Extractor] AI ประมวลผลและสกัด Graph Data เสร็จสิ้น`);
 
   return jsonString;
 }
-
-async function runPipeline() {
-  const targetFilePath = "./sample_policy.txt";
-  const currentOrgId = "org_technova_001";
-
-  try {
-    const extractedText = await extractTextFromDocument(targetFilePath);
-    console.log(`✅ [Docling] ย่อยเอกสารสำเร็จ! ความยาว: ${extractedText.length} ตัวอักษร\n`);
-
-    console.log("1️⃣ [Transform]: ส่งเนื้อหาเอกสารให้ AI สกัดข้อมูล...");
-    const rawResult = await extractGraphData(extractedText, currentOrgId);
-    const graphData = JSON.parse(rawResult);
-    console.log(`✅ สกัดข้อมูลสำเร็จ พบ Entities: ${graphData.entities?.length} โหนด`);
-
-    console.log("2️⃣ [Transform]: กำลังส่ง Entities ให้ Cohere สร้าง Vector...");
-    const textsToEmbed = graphData.entities.map(
-      (e: any) => `${e.name}: ${e.description || ""}`
-    );
-
-    if (textsToEmbed.length > 0) {
-      const embeddings = await generateEmbeddings(textsToEmbed);
-      graphData.entities.forEach((entity: any, index: number) => {
-        entity.embedding = embeddings[index];
-      });
-      console.log("✅ ฝัง Vector สำเร็จครบทุกโหนด!\n");
-    }
-
-    console.log("3️⃣ [Entity Resolution]: จำลองการตรวจสอบกราฟขยะ (Graph Noise)...");
-
-    const dbMockText = ["คุณสมชาย: ผู้บริหารระดับสูงแผนกความปลอดภัยไซเบอร์"];
-    const dbMockEmbedding = await generateEmbeddings(dbMockText);
-
-    const newPersonNode = graphData.entities.find((e: any) => e.type === "PERSON");
-
-    if (newPersonNode && dbMockEmbedding.length > 0) {
-      console.log(`   กำลังเทียบโหนดใหม่: "${newPersonNode.name}" กับ โหนดใน DB: "คุณสมชาย"`);
-
-      const isDup = isDuplicateEntity(newPersonNode.embedding || [], dbMockEmbedding[0] || [], 0.85);
-
-      if (isDup) {
-        console.log("   💡 สรุป: เป็นคนเดียวกัน! ระบบจะสั่ง MERGE เข้าโหนดเดิม ไม่สร้างโหนดขยะเพิ่ม");
-      } else {
-        console.log("   💡 สรุป: เป็นคนละคนกัน! ระบบจะสั่ง CREATE โหนดใหม่");
-      }
-    }
-
-  } catch (error) {
-    console.error("❌ Pipeline Error:", error);
-  }
-}
-
-runPipeline();
