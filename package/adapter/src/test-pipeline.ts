@@ -116,13 +116,13 @@ async function main() {
     const tRelations = performance.now()
     const relations = await getEntityRelations({ organizationId: orgId, entityId: "person_02" })
     console.log(`\n   🕸️  [getEntityRelations] person_02 → ${relations.length} relations`)
-    relations.forEach((r) => console.log(`      - ${r.relationType} → ${r.targetName} (confidence: ${r.confidence_score}, from: ${r.valid_from})`))
+    relations.forEach((r) => console.log(`      - ${r.relationType} → ${r.targetName} | chunk: ${r.source_chunk_id ?? "-"}, doc: ${r.source_document_id ?? "-"}`))
     console.log(`   ⏱️  ${(performance.now() - tRelations).toFixed(2)} ms`)
 
     const tTimeline = performance.now()
     const timeline = await getEntityTimeline({ organizationId: orgId, entityId: "person_02" })
     console.log(`\n   📅 [getEntityTimeline] person_02 → ${timeline.length} entries`)
-    timeline.forEach((t) => console.log(`      - ${t.valid_from} | ${t.relationshipType} → ${t.targetEntityName} (${t.valid_to ?? "ปัจจุบัน"})`))
+    timeline.forEach((t) => console.log(`      - ${t.valid_from} | ${t.relationshipType} → ${t.targetEntityName} | chunk: ${t.source_chunk_id ?? "-"}, doc: ${t.source_document_id ?? "-"}`))
     console.log(`   ⏱️  ${(performance.now() - tTimeline).toFixed(2)} ms`)
 
     const tTimelineFilter = performance.now()

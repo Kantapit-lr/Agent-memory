@@ -338,19 +338,28 @@ const results = await discoverEntities({
 
 ---
 
-### 4. `getEntityRelations`
+#### 4. `getEntityRelations`
 
 ดึง Relation ทั้งหมดที่ Entity นี้มีกับ Entity อื่น พร้อม Citation fields
 
 ```typescript
-import { getEntityRelations } from "@memory-layer/storage-adapter/queries/getEntityRelations"
-
 const results = await getEntityRelations({
   organizationId: "org_001",
   entityId: "person_01"
 })
-// results = [{ relationType, targetId, targetName, valid_from, valid_to, confidence_score, intent_category }]
 ```
+
+| Field | Type | คำอธิบาย |
+|---|---|---|
+| relationType | string | ประเภทความสัมพันธ์ |
+| targetId | string | รหัส Entity ปลายทาง |
+| targetName | string | ชื่อ Entity ปลายทาง |
+| valid_from | string | เริ่มเป็นจริงเมื่อไหร่ |
+| valid_to | string \| null | สิ้นสุดเมื่อไหร่ |
+| confidence_score | number | ความมั่นใจ (0.0 - 1.0) |
+| intent_category | string | FACT, POLICY, DECISION, OPINION, TASK |
+| source_chunk_id | string \| null | Citation: chunk ที่เป็นแหล่งที่มาของความรู้นี้ |
+| source_document_id | string \| null | Citation: document ที่ chunk นั้นอยู่ |
 
 **⚠️ Error ที่อาจเกิดขึ้น:** `EntityNotFoundError`
 
@@ -359,11 +368,8 @@ const results = await getEntityRelations({
 ### 5. `getEntityTimeline`
 
 ดึง Timeline ประวัติความสัมพันธ์ของ Entity เรียงตาม `valid_from ASC`
-ใช้ดูว่า Entity นี้เคยมีความสัมพันธ์อะไรบ้างตามช่วงเวลา
 
 ```typescript
-import { getEntityTimeline } from "@memory-layer/storage-adapter/queries/getEntityTimeline"
-
 // ดึงทุก type
 const timeline = await getEntityTimeline({
   organizationId: "org_001",
@@ -376,11 +382,24 @@ const filtered = await getEntityTimeline({
   entityId: "person_01",
   relationshipType: "BOARD_MEMBER"
 })
-
-// timeline = [{ relationshipType, targetEntityId, targetEntityName,
-//               valid_from, valid_to, confidence_score, intent_category,
-//               criticality_score, sentiment, clearance_level, expires_at, justification }]
 ```
+
+| Field | Type | คำอธิบาย |
+|---|---|---|
+| relationshipType | string | ประเภทความสัมพันธ์ |
+| targetEntityId | string | รหัส Entity ปลายทาง |
+| targetEntityName | string | ชื่อ Entity ปลายทาง |
+| valid_from | string | เริ่มเป็นจริงเมื่อไหร่ |
+| valid_to | string \| null | สิ้นสุดเมื่อไหร่ |
+| confidence_score | number | ความมั่นใจ (0.0 - 1.0) |
+| intent_category | string | FACT, POLICY, DECISION, OPINION, TASK |
+| criticality_score | number | ความสำคัญ (0.0 - 1.0) |
+| sentiment | string | POSITIVE, NEGATIVE, NEUTRAL |
+| clearance_level | number | ระดับการเข้าถึง (1-4) |
+| expires_at | string \| null | วันหมดอายุ |
+| justification | string | เหตุผลที่สกัดความสัมพันธ์นี้ |
+| source_chunk_id | string \| null | Citation: chunk ที่เป็นแหล่งที่มาของความรู้นี้ |
+| source_document_id | string \| null | Citation: document ที่ chunk นั้นอยู่ |
 
 **⚠️ Error ที่อาจเกิดขึ้น:** `EntityNotFoundError`
 

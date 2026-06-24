@@ -9,6 +9,8 @@ export async function getEntityRelations(data: GetEntityRelationsInput): Promise
     const query = `
       MATCH (e:Entity {organizationId: $organizationId, id: $entityId})
       OPTIONAL MATCH (e)-[r]->(target:Entity {organizationId: $organizationId})
+      OPTIONAL MATCH (chunk:Chunk {organizationId: $organizationId})-[:MENTIONS]->(e)
+      OPTIONAL MATCH (doc:Document {organizationId: $organizationId})-[:HAS_CHUNK]->(chunk)
       RETURN
         e IS NOT NULL AS entityExists,
         type(r) AS relationType,
@@ -17,7 +19,9 @@ export async function getEntityRelations(data: GetEntityRelationsInput): Promise
         toString(r.valid_from) AS valid_from,
         toString(r.valid_to) AS valid_to,
         r.confidence_score AS confidence_score,
-        r.intent_category AS intent_category
+        r.intent_category AS intent_category,
+        chunk.id AS source_chunk_id,
+        doc.id AS source_document_id
     `
 
     const result = await session.run(query, {
@@ -40,6 +44,8 @@ export async function getEntityRelations(data: GetEntityRelationsInput): Promise
         valid_to: record.get("valid_to") as string | null,
         confidence_score: record.get("confidence_score") as number,
         intent_category: record.get("intent_category") as string,
+        source_chunk_id: record.get("source_chunk_id") as string | null,
+        source_document_id: record.get("source_document_id") as string | null,
       }))
 
   } catch (error) {
