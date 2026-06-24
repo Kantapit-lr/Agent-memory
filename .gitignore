@@ -1,5 +1,15 @@
+# โฟลเดอร์ที่ห้ามส่งขึ้น GitHub
+node_modules/
 .env
 node_modules/
 
 package-lock.json
 package.json
+.env.*
+dist/
+build/
+*.log
+
+# ถ้าอยากระบุเจาะจงโฟลเดอร์ลูก
+cognitive-extractor/node_modules/
+mcp-server/node_modules/
