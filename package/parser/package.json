@@ -1,0 +1,11 @@
+{
+  "name": "@memory-layer/parser",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "dependencies": {
+    "pdf-parse": "^1.1.1"
+  },
+  "devDependencies": {
+    "@types/pdf-parse": "^1.1.5"
+  }
+}

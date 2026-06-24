@@ -19,6 +19,8 @@ export async function extractGraphData(text: string, organizationId: string) {
           "name": "นายสมชาย วงศ์สว่าง",
           "type": "PERSON",
           "description": "ข้อมูลจำลอง - ผู้อำนวยการแผนก Cybersecurity",
+          "valid_from": "2026-07-01T00:00:00Z",
+          "valid_to": null,
           "organizationId": organizationId
         },
         {
@@ -26,6 +28,8 @@ export async function extractGraphData(text: string, organizationId: string) {
           "name": "TechNova Corp",
           "type": "ORG",
           "description": "ข้อมูลจำลอง - บริษัทต้นสังกัด",
+          "valid_from": "2025-01-01T00:00:00Z",
+          "valid_to": null,
           "organizationId": organizationId
         }
       ],
@@ -56,15 +60,23 @@ CRITICAL RULES:
 1. OUTPUT FORMAT: Your response must strictly match this exact JSON structure. Do NOT add extra nested keys like "properties":
 {
   "entities": [
-    { "id": "unique_string", "name": "String", "type": "PERSON|ORG|FEATURE|FUNCTION", "description": "String", "organizationId": "${organizationId}" }
+    { 
+      "id": "unique_string", 
+      "name": "String", 
+      "type": "PERSON|ORG|FEATURE|FUNCTION", 
+      "description": "String", 
+      "valid_from": "ISO_DATE_OR_NULL", 
+      "valid_to": "ISO_DATE_OR_NULL",
+      "organizationId": "${organizationId}" 
+    }
   ],
   "relationships": [
     { 
       "source_id": "id1", 
       "target_id": "id2", 
       "type": "UPPERCASE_STRING", 
-      "valid_from": "ISO_DATE", 
-      "valid_to": null, 
+      "valid_from": "ISO_DATE_OR_NULL", 
+      "valid_to": "ISO_DATE_OR_NULL", 
       "confidence_score": 0.9, 
       "intent_category": "FACT", 
       "criticality_score": 0.8, 
@@ -77,9 +89,13 @@ CRITICAL RULES:
   ]
 }
 2. PREFIX IDs: For every entity 'id', you MUST prefix it with the organizationId. (e.g., '${organizationId}_somchai').
-3. EXACT 8 DIMENSIONS: Provide ALL 8 dimensions for relationships exactly as named above.
-4. INTENT CATEGORY: MUST be one of "FACT", "POLICY", "DECISION", "OPINION", or "TASK".
-5. CLEAN OUTPUT: DO NOT wrap the JSON in markdown blocks. Output ONLY raw JSON text.`;
+3. TIME EXTRACTION (Bi-temporal): Carefully extract any specific dates, years, or timeframes mentioned in the text that relate to an entity or relationship. 
+   - Convert them to ISO 8601 format (e.g., "YYYY-MM-DDTHH:mm:ssZ"). 
+   - If a Thai Buddhist Era (พ.ศ.) year is found (e.g., 2568, 2569), you MUST convert it to Christian Era (AD) by subtracting 543 (e.g., 2568 -> 2025). 
+   - If no specific date is mentioned for an entity or relationship, explicitly use null for valid_from and valid_to.
+4. EXACT 8 DIMENSIONS: Provide ALL 8 dimensions for relationships exactly as named above.
+5. INTENT CATEGORY: MUST be one of "FACT", "POLICY", "DECISION", "OPINION", or "TASK".
+6. CLEAN OUTPUT: DO NOT wrap the JSON in markdown blocks. Output ONLY raw JSON text.`;
 
   const response = await openai.chat.completions.create({
     model: "anthropic/claude-sonnet-4-6",

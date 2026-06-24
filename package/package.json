@@ -1,5 +1,8 @@
 {
-  "dependencies": {
-    "openai": "^6.44.0"
-  }
+  "name": "cognitive-4d-memory",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "*"
+  ]
 }
