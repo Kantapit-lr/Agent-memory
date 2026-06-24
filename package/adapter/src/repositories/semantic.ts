@@ -16,17 +16,26 @@ import { OrganizationNotFoundError, EntityNotFoundError } from "@/src/types/erro
 
 //syncRelationship ที่ตัดสินใจเองว่าจะทำอะไร
 export async function syncRelationship(data: RelationshipInput) {
-  const orgExists = await checkOrganizationExists(data.organizationId)
+
+  const orgExists = await checkOrganizationExists({ 
+    organizationId: data.organizationId 
+  })
   if (!orgExists) {
     throw new OrganizationNotFoundError(data.organizationId)
   }
 
-  const sourceExists = await checkEntityExists(data.organizationId, data.source_id)
+  const sourceExists = await checkEntityExists({ 
+    organizationId: data.organizationId, 
+    entityId: data.source_id 
+  })
   if (!sourceExists) {
     throw new EntityNotFoundError(data.source_id)
   }
 
-  const targetExists = await checkEntityExists(data.organizationId, data.target_id)
+  const targetExists = await checkEntityExists({ 
+    organizationId: data.organizationId, 
+    entityId: data.target_id 
+  })
   if (!targetExists) {
     throw new EntityNotFoundError(data.target_id)
   }
@@ -112,8 +121,11 @@ export async function linkEntityToEntity(data: RelationshipInput) {
       MATCH (target:Entity {organizationId: $organizationId, id: $target_id})
 
       MERGE (source)-[rel:${data.type}]->(target)
+
+      ON CREATE SET
+          rel.valid_from = datetime($valid_from)
+
       SET rel.organizationId = $organizationId,
-          rel.valid_from = datetime($valid_from),
           rel.valid_to = $valid_to,
           rel.confidence_score = $confidence,
           rel.intent_category = $intent,
@@ -163,8 +175,11 @@ export async function linkChunkToEntity(data: LinkChunkToEntityInput) {
       MATCH (c:Chunk {organizationId: $organizationId, id: $chunk_id})
       MATCH (e:Entity {organizationId: $organizationId, id: $entity_id})
       MERGE (c)-[rel:MENTIONS]->(e)
+
+      ON CREATE SET
+          rel.valid_from = datetime($valid_from)
+
       SET rel.organizationId = $organizationId,
-          rel.valid_from = datetime($valid_from),
           rel.valid_to = $valid_to,
           rel.confidence_score = $confidence,
           rel.intent_category = $intent,

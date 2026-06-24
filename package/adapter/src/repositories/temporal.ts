@@ -2,16 +2,23 @@ import driver from "@/src/db"
 import { checkOrganizationExists } from "@/src/repositories/nodes/checkOrganization"
 import { checkEpisodeExists } from "@/src/repositories/nodes/checkEpisode"
 import { OrganizationNotFoundError, EpisodeNotFoundError } from "@/src/types/errors"
+import type { LinkChunkToEpisodeInput } from "@/src/types/edges/temporal"
 
-export async function linkChunkToEpisode(organizationId: string, episodeId: string, chunkId: string) {
-  const orgExists = await checkOrganizationExists(organizationId)
+
+export async function linkChunkToEpisode(data: LinkChunkToEpisodeInput): Promise<void> {
+  const orgExists = await checkOrganizationExists({ 
+    organizationId: data.organizationId 
+  })
   if (!orgExists) {
-    throw new OrganizationNotFoundError(organizationId)
+    throw new OrganizationNotFoundError(data.organizationId)
   }
 
-  const episodeExists = await checkEpisodeExists(organizationId, episodeId)
+  const episodeExists = await checkEpisodeExists({ 
+    organizationId: data.organizationId, 
+    episodeId: data.episodeId 
+  })
   if (!episodeExists) {
-    throw new EpisodeNotFoundError(episodeId)
+    throw new EpisodeNotFoundError(data.episodeId)
   }
 
   const session = driver.session()
@@ -22,7 +29,11 @@ export async function linkChunkToEpisode(organizationId: string, episodeId: stri
       MATCH (c:Chunk {organizationId: $organizationId, id: $chunkId})
       MERGE (e)-[:EXTRACTED_DURING]->(c)
       `,
-      { organizationId, episodeId, chunkId }
+      { 
+        organizationId: data.organizationId, 
+        episodeId: data.episodeId, 
+        chunkId: data.chunkId 
+      }
     )
   } finally {
     await session.close()

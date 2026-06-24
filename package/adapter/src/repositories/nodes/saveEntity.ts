@@ -4,7 +4,9 @@ import { checkOrganizationExists } from "@/src/repositories/nodes/checkOrganizat
 import { OrganizationNotFoundError } from "@/src/types/errors"
 
 export async function saveEntity(data: Entity) {
-  const orgExists = await checkOrganizationExists(data.organizationId)
+  const orgExists = await checkOrganizationExists({ 
+    organizationId: data.organizationId 
+  })
   if (!orgExists) {
     throw new OrganizationNotFoundError(data.organizationId)
   }
