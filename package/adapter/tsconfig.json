@@ -7,11 +7,11 @@
     "moduleDetection": "force",
     "jsx": "react-jsx",
     "allowJs": true,
-    "types": ["bun"],
+    "types": ["bun", "node"],
     "paths": {
       "@/*": ["./*"]
     },
-
+    
     // Bundler mode
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,

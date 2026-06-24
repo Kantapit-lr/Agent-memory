@@ -1,4 +1,3 @@
-
 # Agent-memory
 =======
 # @memory-layer/storage-adapter
@@ -92,7 +91,7 @@ await saveEntity({
 
 ---
 
-### 3 `saveDocument`
+### 3. `saveDocument`
 
 สร้างเอกสารต้นฉบับ (ใช้กับข้อมูลที่มาจากไฟล์ เช่น PDF)
 
@@ -122,7 +121,7 @@ await saveDocument({
 
 ---
 
-### 4 `saveEpisode`
+### 4. `saveEpisode`
 
 สร้างเหตุการณ์ (ใช้กับข้อมูลที่มาจากการแชท ไม่ใช่ไฟล์)
 
@@ -153,7 +152,7 @@ await saveEpisode({
 ### 5. `saveChunk`
 
 สร้างก้อนเนื้อหา (ข้อความที่หั่นมาจาก Document หรือ Episode)
-ฟังก์ชันนี้จะสร้างความเชื่อมโยงให้อัตโนมัติ (HAS_CHUNK, EXTRACTED_DURING, MENTIONS) ไม่ต้องเรียกเองแยก
+ฟังก์ชันนี้จะสร้างความเชื่อมโยงให้อัตโนมัติ (HAS_CHUNK, NEXT_CHUNK, EXTRACTED_DURING, MENTIONS) ไม่ต้องเรียกเองแยก
 
 ```typescript
 import { saveChunk } from "@memory-layer/storage-adapter/nodes/saveChunk"
@@ -192,7 +191,7 @@ await saveChunk({
   text: "ช่วยทำระบบ Agent Memory ภายในสัปดาห์นี้",
   sequence_order: 1,
   embedding: [0.4, 0.5, 0.6],
-  mentioned_entities: []  // ถ้าไม่มี entity ที่ถูกพูดถึง ส่ง array ว่างได้
+  mentioned_entities: []
 })
 ```
 
@@ -205,7 +204,7 @@ await saveChunk({
 | text | string | เนื้อหาข้อความ |
 | sequence_order | number | ลำดับของ chunk ในเอกสาร/เหตุการณ์ |
 | embedding | number[] | Vector ที่แปลงจาก text (Cohere 1024 มิติ) |
-| mentioned_entities | MentionedEntity[] | รายการ Entity ที่ถูกพูดถึงใน chunk นี้ (ดูรายละเอียดด้านล่าง) |
+| mentioned_entities | MentionedEntity[] | รายการ Entity ที่ถูกพูดถึงใน chunk นี้ |
 
 **`MentionedEntity` แต่ละตัวต้องมี:**
 
@@ -275,6 +274,118 @@ await syncRelationship({
 
 ---
 
+## 🔍 Read / Query Functions
+
+ฟังก์ชันสำหรับดึงข้อมูลออกจาก Graph ทุกตัวรับ object เดียวและคืน object/array กลับมา
+
+---
+
+### 1. `getDocumentTree`
+
+ดึงเอกสารทั้งฉบับพร้อม Chunk ทุกก้อนเรียงตามลำดับ (Deterministic ใช้ `ORDER BY sequence_order` + `.sort()` double-check)
+
+```typescript
+import { getDocumentTree } from "@memory-layer/storage-adapter/queries/getDocumentTree"
+
+const result = await getDocumentTree({
+  organizationId: "org_001",
+  documentId: "doc_01"
+})
+
+// result = null ถ้าไม่เจอ document
+// result = { document: {...}, chunks: [...] } ถ้าเจอ
+```
+
+**Response:**
+| Field | Type | คำอธิบาย |
+|---|---|---|
+| document | Document | metadata ของเอกสาร |
+| chunks | Chunk[] | ทุก chunk เรียงตาม sequence_order (ไม่มี embedding) |
+
+---
+
+### 2. `getChunkSource`
+
+ดึงว่า chunk นี้มาจาก document หรือ episode ไหน ใช้สำหรับ Citation/Traceability
+
+```typescript
+import { getChunkSource } from "@memory-layer/storage-adapter/queries/getChunkSource"
+
+const result = await getChunkSource({
+  organizationId: "org_001",
+  chunkId: "chunk_01"
+})
+// result = { chunkId, sourceType: "document", sourceId: "doc_01" }
+```
+
+**⚠️ Error ที่อาจเกิดขึ้น:** `ChunkNotFoundError`
+
+---
+
+### 3. `discoverEntities`
+
+ค้นหา Entity จาก keyword (case-insensitive, partial match) คืน list ไว้ให้ Agent ยืนยันตัวตนก่อนค้นต่อ ป้องกัน Hallucination จากการสะกดผิด
+
+```typescript
+import { discoverEntities } from "@memory-layer/storage-adapter/queries/discoverEntities"
+
+const results = await discoverEntities({
+  organizationId: "org_001",
+  keyword: "ทวีสิน"
+})
+// results = [{ id, name, type }]
+```
+
+---
+
+### 4. `getEntityRelations`
+
+ดึง Relation ทั้งหมดที่ Entity นี้มีกับ Entity อื่น พร้อม Citation fields
+
+```typescript
+import { getEntityRelations } from "@memory-layer/storage-adapter/queries/getEntityRelations"
+
+const results = await getEntityRelations({
+  organizationId: "org_001",
+  entityId: "person_01"
+})
+// results = [{ relationType, targetId, targetName, valid_from, valid_to, confidence_score, intent_category }]
+```
+
+**⚠️ Error ที่อาจเกิดขึ้น:** `EntityNotFoundError`
+
+---
+
+### 5. `getEntityTimeline`
+
+ดึง Timeline ประวัติความสัมพันธ์ของ Entity เรียงตาม `valid_from ASC`
+ใช้ดูว่า Entity นี้เคยมีความสัมพันธ์อะไรบ้างตามช่วงเวลา
+
+```typescript
+import { getEntityTimeline } from "@memory-layer/storage-adapter/queries/getEntityTimeline"
+
+// ดึงทุก type
+const timeline = await getEntityTimeline({
+  organizationId: "org_001",
+  entityId: "person_01"
+})
+
+// filter เฉพาะ type ที่ต้องการ
+const filtered = await getEntityTimeline({
+  organizationId: "org_001",
+  entityId: "person_01",
+  relationshipType: "BOARD_MEMBER"
+})
+
+// timeline = [{ relationshipType, targetEntityId, targetEntityName,
+//               valid_from, valid_to, confidence_score, intent_category,
+//               criticality_score, sentiment, clearance_level, expires_at, justification }]
+```
+
+**⚠️ Error ที่อาจเกิดขึ้น:** `EntityNotFoundError`
+
+---
+
 ## 🔒 Internal Functions (ห้ามเรียกใช้ตรงๆ)
 
 ฟังก์ชันด้านล่างนี้ถูกเรียกใช้จาก Public API ด้านบนโดยอัตโนมัติแล้ว **ไม่ต้องเรียกเอง**
@@ -315,13 +426,12 @@ Organization, Entity, Document, Episode, Chunk
 
 ### Edges (3 กลุ่มตาม Cognitive 4D Memory Layer Spec)
 ```
-Structural : HAS_CHUNK            (Document → Chunk)
-Semantic   : MENTIONS              (Chunk → Entity, มี Bi-Temporal 8 properties)
-             RELATED_TO/ACTS_AS/etc (Entity → Entity, มี Bi-Temporal 8 properties)
-Temporal   : EXTRACTED_DURING      (Episode → Chunk)
+Structural : HAS_CHUNK, NEXT_CHUNK        (Document/Chunk → Chunk)
+Semantic   : MENTIONS                      (Chunk → Entity, มี Bi-Temporal 8 properties)
+             RELATED_TO/ACTS_AS/etc        (Entity → Entity, มี Bi-Temporal 8 properties)
+Temporal   : EXTRACTED_DURING             (Episode → Chunk)
 ```
 
 ### Multi-tenant
 ทุก Node และ Edge มี property `organizationId` กำกับไว้เสมอ (Logical Isolation)
 เพื่อแยกข้อมูลแต่ละองค์กรออกจากกัน แม้จะใช้ Neo4j database เดียวกัน
->>>>>>> origin/storage-adapter
