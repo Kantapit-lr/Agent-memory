@@ -6,3 +6,13 @@ export interface Document {
   language: string
   authors: string[]
 }
+
+export interface CheckDocumentInput {
+  organizationId: string
+  documentId: string
+}
+
+export interface CheckDocumentsExistInput {
+  organizationId: string
+  documentIds: string[]
+}

@@ -5,3 +5,13 @@ export interface Episode {
   source: string
   summary: string
 }
+
+export interface CheckEpisodeInput {
+  organizationId: string
+  episodeId: string
+}
+
+export interface CheckEpisodesExistInput {
+  organizationId: string
+  episodeIds: string[]
+}

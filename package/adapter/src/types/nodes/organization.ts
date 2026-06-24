@@ -3,3 +3,7 @@ export interface Organization {
   name: string
   created_at: string
 }
+
+export interface CheckOrganizationInput {
+  organizationId: string
+}

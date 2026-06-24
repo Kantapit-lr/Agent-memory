@@ -34,3 +34,13 @@ export class EpisodeNotFoundError extends Error {
     this.code = "EPISODE_NOT_FOUND"
   }
 }
+
+// เพิ่มเข้าไปในไฟล์ types/errors.ts ของมึงเลย
+export class ChunkNotFoundError extends Error {
+  code: string
+  constructor(chunkId: string) {
+    super(`ChunkID: "${chunkId}" not found. Please verify the Chunk exists in the graph.`)
+    this.name = "ChunkNotFoundError"
+    this.code = "CHUNK_NOT_FOUND"
+  }
+}
