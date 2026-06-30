@@ -1,4 +1,3 @@
-// types/errors.ts
 export class OrganizationNotFoundError extends Error {
   code: string
   constructor(organizationId: string) {
@@ -42,5 +41,23 @@ export class ChunkNotFoundError extends Error {
     super(`ChunkID: "${chunkId}" not found. Please verify the Chunk exists in the graph.`)
     this.name = "ChunkNotFoundError"
     this.code = "CHUNK_NOT_FOUND"
+  }
+}
+
+export class EntityHasActiveRelationshipsError extends Error {
+  code: string
+  constructor(entityId: string, count: number) {
+    super(`EntityID: "${entityId}" still has ${count} active relationship(s)/mention(s). Use force=true to delete anyway, or end relationships first.`)
+    this.name = "EntityHasActiveRelationshipsError"
+    this.code = "ENTITY_HAS_ACTIVE_RELATIONSHIPS"
+  }
+}
+
+export class OrganizationNotEmptyError extends Error {
+  code: string
+  constructor(organizationId: string, nodeCount: number) {
+    super(`OrganizationID: "${organizationId}" still has ${nodeCount} node(s) attached. Use force=true to cascade delete, or remove child nodes first.`)
+    this.name = "OrganizationNotEmptyError"
+    this.code = "ORGANIZATION_NOT_EMPTY"
   }
 }
