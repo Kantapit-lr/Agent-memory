@@ -405,6 +405,98 @@ const filtered = await getEntityTimeline({
 
 ---
 
+## 🗑 Delete API
+
+ฟังก์ชันลบ ทุกตัวรับ object เดียว มี `force` (optional, default = false) ควบคุมว่าจะ cascade delete หรือไม่
+ถ้าไม่ใส่ `force` แล้วยังมี Node/Relationship ลูกค้างอยู่ ระบบจะโยน error แทนการลบ เพื่อกันลบข้อมูลพลาด
+
+---
+
+### 1. `deleteChunk`
+
+ลบ Chunk เดี่ยว พร้อมเส้นทุกเส้นที่ผูกกับมัน (HAS_CHUNK, NEXT_CHUNK, MENTIONS, EXTRACTED_DURING)
+
+```typescript
+import { deleteChunk } from "@memory-layer/storage-adapter/nodes/deleteChunk"
+
+await deleteChunk({
+  organizationId: "org_001",
+  chunkId: "chunk_01"
+})
+```
+
+**⚠️ หมายเหตุสำคัญ:** ฟังก์ชันนี้ไม่ซ่อม `NEXT_CHUNK` ของก้อนข้างเคียงให้อัตโนมัติ
+ถ้าลบ chunk ตรงกลาง (เช่น chunk_02 จากสาย chunk_01→chunk_02→chunk_03) ลำดับจะขาดตอน
+ต้องจัดการ re-link เองถ้าต้องการ
+
+**⚠️ Error ที่อาจเกิดขึ้น:** `OrganizationNotFoundError`, `ChunkNotFoundError`
+
+---
+
+### 2. `deleteDocument`
+
+ลบ Document — ถ้ายังมี Chunk แขวนอยู่ ต้องใส่ `force: true` เพื่อ cascade ลบ Chunk ไปด้วย
+
+```typescript
+import { deleteDocument } from "@memory-layer/storage-adapter/nodes/deleteDocument"
+
+// ลบเฉพาะ Document ที่ไม่มี Chunk เหลือแล้ว
+await deleteDocument({ organizationId: "org_001", documentId: "doc_01" })
+
+// cascade ลบ Document พร้อม Chunk ทุกก้อนที่แขวนอยู่
+await deleteDocument({ organizationId: "org_001", documentId: "doc_01", force: true })
+```
+
+**⚠️ Error ที่อาจเกิดขึ้น:** `OrganizationNotFoundError`, `DocumentNotFoundError`, Error (ยังมี Chunk ค้าง ถ้าไม่ส่ง force)
+
+---
+
+### 3. `deleteEpisode`
+
+ลบ Episode — ถ้ายังมี Chunk แขวนอยู่ (ผ่าน EXTRACTED_DURING) ต้องใส่ `force: true`
+
+```typescript
+import { deleteEpisode } from "@memory-layer/storage-adapter/nodes/deleteEpisode"
+
+await deleteEpisode({ organizationId: "org_001", episodeId: "episode_01", force: true })
+```
+
+**⚠️ Error ที่อาจเกิดขึ้น:** `OrganizationNotFoundError`, `EpisodeNotFoundError`, Error (ยังมี Chunk ค้าง ถ้าไม่ส่ง force)
+
+---
+
+### 4. `deleteEntity`
+
+ลบ Entity — ถ้ายังมีความสัมพันธ์ active อยู่ (MENTIONS จาก Chunk ใดๆ หรือ Entity-Entity ที่ `valid_to IS NULL`)
+ต้องใส่ `force: true` เพื่อลบความสัมพันธ์เหล่านั้นไปด้วย
+
+```typescript
+import { deleteEntity } from "@memory-layer/storage-adapter/nodes/deleteEntity"
+
+await deleteEntity({ organizationId: "org_001", entityId: "person_01", force: true })
+```
+
+**⚠️ Error ที่อาจเกิดขึ้น:** `OrganizationNotFoundError`, `EntityNotFoundError`, `EntityHasActiveRelationshipsError` (ถ้าไม่ส่ง force)
+
+---
+
+### 5. `deleteOrganization`
+
+ลบทั้งองค์กร — **อันตรายที่สุดในระบบ** ลบ Entity, Document, Episode, Chunk และเส้นทุกเส้นที่แท็ก `organizationId` นี้ทั้งหมด
+ถ้ายังมี Node ใดๆ ค้างอยู่ ต้องใส่ `force: true` การลบนี้ย้อนกลับไม่ได้ (irreversible)
+
+```typescript
+import { deleteOrganization } from "@memory-layer/storage-adapter/nodes/deleteOrganization"
+
+await deleteOrganization({ organizationId: "org_001", force: true })
+```
+
+**คำแนะนำ:** ฝั่งที่เรียกใช้ (เช่น MCP tool หรือ UI) ควรมี confirmation step ก่อนเรียกด้วย `force: true` เสมอ
+
+**⚠️ Error ที่อาจเกิดขึ้น:** `OrganizationNotFoundError`, `OrganizationNotEmptyError` (ถ้าไม่ส่ง force)
+
+---
+
 ## 🔒 Internal Functions (ห้ามเรียกใช้ตรงๆ)
 
 ฟังก์ชันด้านล่างนี้ถูกเรียกใช้จาก Public API ด้านบนโดยอัตโนมัติแล้ว **ไม่ต้องเรียกเอง**

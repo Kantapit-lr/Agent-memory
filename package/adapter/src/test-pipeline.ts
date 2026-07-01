@@ -9,6 +9,11 @@ import { getChunkSource } from "@/src/repositories/queries/getChunkSource"
 import { getEntityTimeline } from "@/src/repositories/queries/getEntityTimeline"
 import { getEntityRelations } from "@/src/repositories/queries/getEntityRelations"
 import { discoverEntities } from "@/src/repositories/queries/discoverEntities"
+import { deleteChunk } from "@/src/repositories/nodes/deleteChunk"
+import { deleteDocument } from "@/src/repositories/nodes/deleteDocument"
+import { deleteEpisode } from "@/src/repositories/nodes/deleteEpisode"
+import { deleteEntity } from "@/src/repositories/nodes/deleteEntity"
+import { deleteOrganization } from "@/src/repositories/nodes/deleteOrganization"
 import driver from "@/src/db"
 
 async function main() {
@@ -132,6 +137,42 @@ async function main() {
     console.log(`   ⏱️  ${(performance.now() - tTimelineFilter).toFixed(2)} ms`)
 
     console.log(`\n🎉 ทดสอบสำเร็จสมบูรณ์ (รวม: ${(performance.now() - pipelineStart).toFixed(2)} ms)`)
+
+    // ─────────────────────────────────────────
+    // DELETE PIPELINE
+    // ─────────────────────────────────────────
+    console.log("\n🗑️  เริ่มต้นทดสอบ Delete Pipeline...")
+
+    const tDelChunk = performance.now()
+    const delChunkResult = await deleteChunk({ organizationId: orgId, chunkId: "chunk_v2_time_01" })
+    console.log(`\n   🗑️  [deleteChunk] chunk_v2_time_01 → ${JSON.stringify(delChunkResult)}`)
+    console.log(`   ⏱️  ${(performance.now() - tDelChunk).toFixed(2)} ms`)
+
+    // ลบ Episode ที่เพิ่งหลุด Chunk ไปแล้ว ไม่ต้อง force
+    const tDelEpisode = performance.now()
+    const delEpisodeResult = await deleteEpisode({ organizationId: orgId, episodeId })
+    console.log(`\n   🗑️  [deleteEpisode] ${episodeId} (ไม่มี Chunk เหลือ) → ${JSON.stringify(delEpisodeResult)}`)
+    console.log(`   ⏱️  ${(performance.now() - tDelEpisode).toFixed(2)} ms`)
+
+    // ลบ Document ที่ยังมี Chunk เหลืออยู่ 3 ก้อน → ต้อง force: true
+    const tDelDocument = performance.now()
+    const delDocumentResult = await deleteDocument({ organizationId: orgId, documentId: docId, force: true })
+    console.log(`\n   🗑️  [deleteDocument] ${docId} (force cascade) → ${JSON.stringify(delDocumentResult)}`)
+    console.log(`   ⏱️  ${(performance.now() - tDelDocument).toFixed(2)} ms`)
+
+    // person_02 ยังมีความสัมพันธ์ active กับ org_02_business → ต้อง force: true
+    const tDelEntity = performance.now()
+    const delEntityResult = await deleteEntity({ organizationId: orgId, entityId: "person_02", force: true })
+    console.log(`\n   🗑️  [deleteEntity] person_02 (force) → ${JSON.stringify(delEntityResult)}`)
+    console.log(`   ⏱️  ${(performance.now() - tDelEntity).toFixed(2)} ms`)
+
+    // ปิดท้าย: ลบทั้งองค์กรแบบ force (org_02_business ยังเหลืออยู่)
+    const tDelOrg = performance.now()
+    const delOrgResult = await deleteOrganization({ organizationId: orgId, force: true })
+    console.log(`\n   🗑️  [deleteOrganization] ${orgId} (force) → ${JSON.stringify(delOrgResult)}`)
+    console.log(`   ⏱️  ${(performance.now() - tDelOrg).toFixed(2)} ms`)
+
+    console.log(`\n🎉 Delete Pipeline สำเร็จสมบูรณ์ (รวมทั้งหมด: ${(performance.now() - pipelineStart).toFixed(2)} ms)`)
 
   } catch (error) {
     console.error("❌ เกิดข้อผิดพลาด:", error)
