@@ -4,7 +4,7 @@ import { checkOrganizationExists } from "@/src/repositories/nodes/checkOrganizat
 import { checkEntitiesExist } from "@/src/repositories/nodes/checkEntity"
 import { OrganizationNotFoundError, EntityNotFoundError } from "@/src/types/errors"
 import { syncChunkMention } from "@/src/repositories/semantic"
-import { linkChunkToDocument, linkNextChunk } from "@/src/repositories/structural"
+import { linkChunkToDocument } from "@/src/repositories/structural"
 import { linkChunkToEpisode } from "@/src/repositories/temporal"
 
 export async function saveChunk(data: Chunk) {
@@ -35,7 +35,8 @@ if (data.mentioned_entities.length > 0) {
 
   const session = driver.session()
   try {
-    // 2. สร้างหรืออัปเดตตัวตนของ Chunk Node
+    // 2+3. สร้าง Chunk Node และเชื่อม [:NEXT_CHUNK] ในคำสั่งเดียว (ลด round trip)
+    // OPTIONAL MATCH หา prev chunk ก่อน ถ้าเจอก็ MERGE เส้น NEXT_CHUNK ต่อเลย ไม่ต้องยิง query แยก
     await session.run(
       `
       MERGE (c:Chunk {organizationId: $organizationId, id: $chunk_id})
@@ -44,6 +45,15 @@ if (data.mentioned_entities.length > 0) {
           c.embedding = $embedding,
           c.source_type = $source_type,
           c.source_id = $source_id
+      WITH c
+      OPTIONAL MATCH (prev:Chunk {
+        organizationId: $organizationId,
+        source_id: $source_id,
+        source_type: $source_type,
+        sequence_order: $prevOrder
+      })
+      WHERE $sequence_order > 1 AND prev IS NOT NULL
+      MERGE (prev)-[:NEXT_CHUNK]->(c)
       `,
       {
         organizationId: data.organizationId,
@@ -52,40 +62,10 @@ if (data.mentioned_entities.length > 0) {
         sequence_order: data.sequence_order,
         embedding: data.embedding,
         source_type: data.source_type,
-        source_id: data.source_id
+        source_id: data.source_id,
+        prevOrder: data.sequence_order - 1
       }
     )
-
-    // 3. กลไกสร้างกิ่งก้าน [:NEXT_CHUNK] อัตโนมัติ (ขยับดักเช็ก Type ป้องกันไฟแดงเตือนที่เลข [0])
-    if (data.sequence_order > 1) {
-      const prevOrder = data.sequence_order - 1
-      
-      const findPrevQuery = `
-        MATCH (prev:Chunk {organizationId: $organizationId, source_id: $source_id, source_type: $source_type, sequence_order: $prevOrder})
-        RETURN prev.id AS prevId
-      `
-      
-      const prevResult = await session.run(findPrevQuery, {
-        organizationId: data.organizationId,
-        source_id: data.source_id,
-        source_type: data.source_type,
-        prevOrder: prevOrder
-      })
-
-      const prevRecords = prevResult.records
-      const firstPrevRecord = prevRecords[0]
-
-      // ดักเช็กโครงสร้างข้อมูลอาร์เรย์และเรคคอร์ดแรกแบบปลอดภัยสูงสุด
-      if (prevRecords.length > 0 && firstPrevRecord) {
-        const prevChunkId = firstPrevRecord.get("prevId")
-        
-        await linkNextChunk({
-          organizationId: data.organizationId,
-          fromChunkId: prevChunkId,
-          toChunkId: data.id
-        })
-      }
-    }
 
   } finally {
     await session.close()

@@ -16,9 +16,17 @@ bun install
 
 2. สร้างไฟล์ `.env` จาก `.env.example` แล้วใส่ค่าให้ตรงกับ Neo4j ที่ใช้งานจริง
 ```env
-NEO4J_URI=neo4j://127.0.0.1:7687
+NEO4J_URI=bolt://localhost:7687
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=your_password
+
+REDIS_HOST=localhost
+REDIS_PORT=6379
+```
+
+3. สร้าง Index ใน Neo4j (รันครั้งเดียวตอน setup หรือหลัง wipe database)
+```bash
+bun --env-file=.env src/setup-indexes.ts
 ```
 
 ---
