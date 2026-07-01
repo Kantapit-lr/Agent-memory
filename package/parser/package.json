@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "main": "src/index.ts",
   "dependencies": {
-    "pdf-parse": "^1.1.1"
+    "pdf-parse": "^1.1.1",
+    "web-tree-sitter": "^0.26.10"
   },
   "devDependencies": {
     "@types/pdf-parse": "^1.1.5"
