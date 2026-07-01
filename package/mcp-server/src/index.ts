@@ -1,9 +1,9 @@
 import { Elysia } from "elysia";
 import OpenAI from "openai";
+import { Queue } from "bullmq";
 
 import { chunkText, processPDF } from "../../parser/src"; 
 import { extractGraphData, generateEmbeddings } from "../../cognitive-extractor/src";
-
 import driver from "../../adapter/src/db";
 import { saveOrganization } from "../../adapter/src/repositories/nodes/saveOrganization";
 import { saveDocument } from "../../adapter/src/repositories/nodes/saveDocument";
@@ -11,7 +11,6 @@ import { saveChunk } from "../../adapter/src/repositories/nodes/saveChunk";
 import { saveEntity } from "../../adapter/src/repositories/nodes/saveEntity";
 import { syncRelationship } from "../../adapter/src/repositories/semantic";
 import { saveEpisode } from "../../adapter/src/repositories/nodes/saveEpisode";
-
 import { getDocumentTree } from "../../adapter/src/repositories/queries/getDocumentTree";
 import { discoverEntities } from "../../adapter/src/repositories/queries/discoverEntities";
 import { getEntityTimeline } from "../../adapter/src/repositories/queries/getEntityTimeline";
@@ -20,10 +19,7 @@ const isMock = process.env.USE_MOCK_AI === "true";
 
 const safeExtractGraphData = async (text: string, orgId: string) => {
   if (isMock) {
-    console.log("🟡 [MOCK] สกัด Graph Data จำลอง (ประหยัด Budget!)");
-
     const timestamp = Date.now(); 
-
     return JSON.stringify({
       entities: [
         { id: `ent_${timestamp}_1`, name: "ทวีสิน", type: "PERSON", description: "พนักงานฝ่าย IT", valid_from: new Date().toISOString() },
@@ -39,7 +35,6 @@ const safeExtractGraphData = async (text: string, orgId: string) => {
 
 const safeGenerateEmbeddings = async (texts: string[]) => {
   if (isMock) {
-    console.log("🟡 [MOCK] สร้าง Vector จำลอง (1024 มิติ)");
     return texts.map(() => Array(1024).fill(0.123)); 
   }
   return generateEmbeddings(texts);
@@ -65,6 +60,15 @@ const executeWithRetry = async <T>(operation: () => Promise<T>, retries = 3, del
   throw lastError;
 };
 
+// เปลี่ยนชื่อคิวให้ตรงกับที่เพื่อนตั้งไว้
+const QUEUE_NAME = "ingestion"; 
+const ingestQueue = new Queue(QUEUE_NAME, {
+  connection: {
+    host: process.env.REDIS_HOST || "127.0.0.1",
+    port: Number(process.env.REDIS_PORT) || 6379
+  }
+});
+
 const app = new Elysia();
 
 app.post("/api/memory/ingest", async ({ body }) => {
@@ -76,7 +80,9 @@ app.post("/api/memory/ingest", async ({ body }) => {
     const docId = documentId || `doc_${Date.now()}`;
     await saveDocument({ organizationId, id: docId, title: title || "Untitled Document", type: "TEXT", language: "TH", authors: ["System"] });
 
-    let totalEntities = 0, totalRels = 0;
+    const allEntities: any[] = [];
+    const allChunks: any[] = [];
+    const allRelationships: any[] = [];
     const CONCURRENCY_LIMIT = 4;
 
     for (let i = 0; i < chunks.length; i += CONCURRENCY_LIMIT) {
@@ -93,26 +99,38 @@ app.post("/api/memory/ingest", async ({ body }) => {
           const entities = graphData.entities || [];
           const relationships = graphData.relationships || [];
 
-          for (let k = 0; k < entities.length; k++) {
-            const entity = entities[k];
-            await executeWithRetry(() => saveEntity({ organizationId, id: entity.id, name: entity.name, type: entity.type.toUpperCase(), description: entity.description || "" }));
+          for (const entity of entities) {
+            allEntities.push(entity);
             mentionedEntitiesForChunk.push({
-              entity_id: entity.id, valid_from: entity.valid_from || new Date().toISOString(), valid_to: entity.valid_to || null,
+              entity_id: entity.id, valid_from: entity.valid_from || new Date().toISOString(), valid_to: null,
               confidence_score: 0.9, intent_category: "FACT", criticality_score: 0.5, sentiment: "NEUTRAL", clearance_level: 1, expires_at: null, justification: `Extracted chunk: ${chunk.id}`
             });
           }
 
-          await executeWithRetry(() => saveChunk({ organizationId, id: chunk.id, source_type: "document", source_id: docId, text: chunk.text, sequence_order: chunk.sequence_order, embedding: chunkEmbeddings[0] || [], mentioned_entities: mentionedEntitiesForChunk }));
+          allChunks.push({
+            id: chunk.id, source_type: "document", source_id: docId, text: chunk.text, sequence_order: chunk.sequence_order,
+            embedding: chunkEmbeddings[0] || [], mentioned_entities: mentionedEntitiesForChunk
+          });
 
           for (const rel of relationships) {
-            await executeWithRetry(() => syncRelationship({ organizationId, source_id: rel.source_id, target_id: rel.target_id, type: rel.type.toUpperCase(), valid_from: rel.valid_from || new Date().toISOString(), valid_to: rel.valid_to || null, confidence_score: 0.9, intent_category: "FACT", criticality_score: 0.5, sentiment: "NEUTRAL", clearance_level: 1, expires_at: null, justification: "Extracted relationship" }));
+            allRelationships.push({
+              source_id: rel.source_id, target_id: rel.target_id, type: rel.type.toUpperCase(),
+              valid_from: rel.valid_from || new Date().toISOString(), valid_to: rel.valid_to || null,
+              confidence_score: 0.9, intent_category: "FACT", criticality_score: 0.5, sentiment: "NEUTRAL", clearance_level: 1, expires_at: null, justification: "Extracted relationship"
+            });
           }
-
-          totalEntities += entities.length; totalRels += relationships.length;
         } catch (error) { console.error(error); }
       }));
     }
-    return { status: "success", metrics: { chunks: chunks.length, entities: totalEntities, relationships: totalRels } };
+
+    const job = await ingestQueue.add("ingest-text-job", {
+      organizationId,
+      chunks: allChunks,
+      entities: allEntities,
+      relationships: allRelationships
+    });
+
+    return { status: "processing", message: "ประมวลผล AI เสร็จสิ้น และส่งข้อมูลให้ Worker บันทึกลงฐานข้อมูลแล้ว", job_id: job.id };
   } catch (error: any) { return new Response(JSON.stringify({ error: error.message }), { status: 500 }); }
 });
 
@@ -129,7 +147,9 @@ app.post("/api/memory/ingest/pdf", async ({ body }) => {
     const docId = `doc_pdf_${Date.now()}`;
     await saveDocument({ organizationId: orgId, id: docId, title: title || file.name || "Untitled PDF", type: "PDF", language: "TH", authors: ["System"] });
 
-    let totalEntities = 0, totalRels = 0;
+    const allEntities: any[] = [];
+    const allChunks: any[] = [];
+    const allRelationships: any[] = [];
     const CONCURRENCY_LIMIT = 4;
 
     for (let i = 0; i < chunks.length; i += CONCURRENCY_LIMIT) {
@@ -146,26 +166,38 @@ app.post("/api/memory/ingest/pdf", async ({ body }) => {
           const entities = graphData.entities || [];
           const relationships = graphData.relationships || [];
 
-          for (let k = 0; k < entities.length; k++) {
-            const entity = entities[k];
-            await executeWithRetry(() => saveEntity({ organizationId: orgId, id: entity.id, name: entity.name, type: entity.type.toUpperCase(), description: entity.description || "" }));
+          for (const entity of entities) {
+            allEntities.push(entity);
             mentionedEntitiesForChunk.push({
-              entity_id: entity.id, valid_from: entity.valid_from || new Date().toISOString(), valid_to: entity.valid_to || null,
+              entity_id: entity.id, valid_from: entity.valid_from || new Date().toISOString(), valid_to: null,
               confidence_score: 0.9, intent_category: "FACT", criticality_score: 0.5, sentiment: "NEUTRAL", clearance_level: 1, expires_at: null, justification: `Extracted chunk: ${chunk.id}`
             });
           }
 
-          await executeWithRetry(() => saveChunk({ organizationId: orgId, id: chunk.id, source_type: "document", source_id: docId, text: chunk.text, sequence_order: chunk.sequence_order, embedding: chunkEmbeddings[0] || [], mentioned_entities: mentionedEntitiesForChunk }));
+          allChunks.push({
+            id: chunk.id, source_type: "document", source_id: docId, text: chunk.text, sequence_order: chunk.sequence_order,
+            embedding: chunkEmbeddings[0] || [], mentioned_entities: mentionedEntitiesForChunk
+          });
 
           for (const rel of relationships) {
-            await executeWithRetry(() => syncRelationship({ organizationId: orgId, source_id: rel.source_id, target_id: rel.target_id, type: rel.type.toUpperCase(), valid_from: rel.valid_from || new Date().toISOString(), valid_to: rel.valid_to || null, confidence_score: 0.9, intent_category: "FACT", criticality_score: 0.5, sentiment: "NEUTRAL", clearance_level: 1, expires_at: null, justification: "Extracted relationship" }));
+            allRelationships.push({
+              source_id: rel.source_id, target_id: rel.target_id, type: rel.type.toUpperCase(),
+              valid_from: rel.valid_from || new Date().toISOString(), valid_to: rel.valid_to || null,
+              confidence_score: 0.9, intent_category: "FACT", criticality_score: 0.5, sentiment: "NEUTRAL", clearance_level: 1, expires_at: null, justification: "Extracted relationship"
+            });
           }
-
-          totalEntities += entities.length; totalRels += relationships.length;
         } catch (error) { console.error(error); }
       }));
     }
-    return { status: "success", metrics: { chunks: chunks.length, entities: totalEntities, relationships: totalRels } };
+
+    const job = await ingestQueue.add("ingest-pdf-job", {
+      organizationId: orgId,
+      chunks: allChunks,
+      entities: allEntities,
+      relationships: allRelationships
+    });
+
+    return { status: "processing", message: "ประมวลผล PDF เสร็จสิ้น และส่งข้อมูลให้ Worker บันทึกลงฐานข้อมูลแล้ว", job_id: job.id };
   } catch (error: any) { return new Response(JSON.stringify({ error: error.message }), { status: 500 }); }
 });
 
@@ -194,7 +226,7 @@ app.post("/api/memory/chat", async ({ body }) => {
       const entity = entities[k];
       await executeWithRetry(() => saveEntity({ organizationId: orgId, id: entity.id, name: entity.name, type: entity.type.toUpperCase(), description: entity.description || "" }));
       mentionedEntitiesForChunk.push({
-        entity_id: entity.id, valid_from: entity.valid_from || new Date().toISOString(), valid_to: entity.valid_to || null,
+        entity_id: entity.id, valid_from: entity.valid_from || new Date().toISOString(), valid_to: null,
         confidence_score: 0.9, intent_category: "FACT", criticality_score: 0.5, sentiment: "NEUTRAL", clearance_level: 1, expires_at: null, justification: `Extracted from chat`
       });
     }
@@ -242,7 +274,7 @@ app.post("/api/memory/query", async ({ body }) => {
     if (!retrievedContext) return { status: "success", question, answer: "Not found", citations: [], raw_query_result: [] };
 
     if (isMock) {
-      answer = `🤖 [MOCK MODE] นี่คือคำตอบจำลองครับ! ข้อมูลอ้างอิงหลักที่เจอคือ [${rawResults[0]?.chunk_id || 'ไม่มี'}]`;
+      answer = `[MOCK MODE] นี่คือคำตอบจำลองครับ! ข้อมูลอ้างอิงหลักที่เจอคือ [${rawResults[0]?.chunk_id || 'ไม่มี'}]`;
     } else {
       const aiResponse = await executeWithRetry(() => aiClient.chat.completions.create({
         model: "anthropic/claude-sonnet-4-6", temperature: 0.1,
