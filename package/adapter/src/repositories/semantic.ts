@@ -209,17 +209,22 @@ export async function linkChunkToEntity(data: LinkChunkToEntityInput) {
   }
 }
 
-// function เช็คว่ามี relationship active อยู่มั้ย
+// function เช็คว่ามี relationship active อยู่มั้ย (เช็คทั้งสองทิศ A→B และ B→A)
+// เพื่อกันสร้าง relationship ซ้ำในทิศตรงข้าม ซึ่งจะทำให้กราฟสกปรก
 export async function getActiveRelationship(data: CheckActiveRelationshipInput): Promise<ActiveRelationship | null> {
   const session = driver.session()
   try {
     const result = await session.run(
       `
-      MATCH (source:Entity {organizationId: $organizationId, id: $source_id})
-            -[rel]->
-            (target:Entity {organizationId: $organizationId, id: $target_id})
-      WHERE rel.valid_to IS NULL
-      RETURN type(rel) as relType, rel
+      MATCH (a:Entity {organizationId: $organizationId, id: $source_id})
+      MATCH (b:Entity {organizationId: $organizationId, id: $target_id})
+      OPTIONAL MATCH (a)-[r1]->(b) WHERE r1.valid_to IS NULL
+      OPTIONAL MATCH (b)-[r2]->(a) WHERE r2.valid_to IS NULL
+      WITH 
+        CASE WHEN r1 IS NOT NULL THEN r1 ELSE r2 END AS rel,
+        CASE WHEN r1 IS NOT NULL THEN type(r1) ELSE type(r2) END AS relType
+      WHERE rel IS NOT NULL
+      RETURN rel, relType
       `,
       {
         organizationId: data.organizationId,

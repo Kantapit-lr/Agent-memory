@@ -6,10 +6,13 @@ export async function getEntityRelations(data: GetEntityRelationsInput): Promise
   const session = driver.session()
 
   try {
+    // citation: หา chunk ที่ MENTIONS ทั้ง source และ target entity พร้อมกัน
+    // เพื่อให้ได้ chunk ที่เป็นที่มาของ relationship จริงๆ ไม่ใช่แค่ chunk ที่พูดถึง entity ฝั่งใดฝั่งหนึ่ง
     const query = `
       MATCH (e:Entity {organizationId: $organizationId, id: $entityId})
       OPTIONAL MATCH (e)-[r]->(target:Entity {organizationId: $organizationId})
       OPTIONAL MATCH (chunk:Chunk {organizationId: $organizationId})-[:MENTIONS]->(e)
+        WHERE (chunk)-[:MENTIONS]->(target)
       OPTIONAL MATCH (doc:Document {organizationId: $organizationId})-[:HAS_CHUNK]->(chunk)
       RETURN
         e IS NOT NULL AS entityExists,
