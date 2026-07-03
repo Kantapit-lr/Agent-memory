@@ -95,7 +95,11 @@ CRITICAL RULES:
    - If no specific date is mentioned for an entity or relationship, explicitly use null for valid_from and valid_to.
 4. EXACT 8 DIMENSIONS: Provide ALL 8 dimensions for relationships exactly as named above.
 5. INTENT CATEGORY: MUST be one of "FACT", "POLICY", "DECISION", "OPINION", or "TASK".
-6. CLEAN OUTPUT: DO NOT wrap the JSON in markdown blocks. Output ONLY raw JSON text.`;
+6. CLEAN OUTPUT: DO NOT wrap the JSON in markdown blocks. Output ONLY raw JSON text.
+7. CRITICAL ENTITY EXTRACTION (NEVER IGNORE):
+   - PERSON: You MUST always extract names of people. Do not skip them.
+   - ROLE/POSITION: Extract job titles and link them to the PERSON using [HOLDS_POSITION].
+   - ORGANIZATION: Link the PERSON to their company using [WORKS_AT].`;
 
   const response = await openai.chat.completions.create({
     model: "anthropic/claude-sonnet-4-6",

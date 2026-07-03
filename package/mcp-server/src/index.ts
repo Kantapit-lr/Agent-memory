@@ -2,7 +2,7 @@ import { Elysia } from "elysia";
 import OpenAI from "openai";
 import { Queue } from "bullmq";
 
-import { chunkText, processPDF } from "../../parser/src"; 
+import { chunkText, processPDF } from "../../parser/src";
 import { extractGraphData, generateEmbeddings } from "../../cognitive-extractor/src";
 import driver from "../../adapter/src/db";
 import { saveOrganization } from "../../adapter/src/repositories/nodes/saveOrganization";
@@ -19,7 +19,7 @@ const isMock = process.env.USE_MOCK_AI === "true";
 
 const safeExtractGraphData = async (text: string, orgId: string) => {
   if (isMock) {
-    const timestamp = Date.now(); 
+    const timestamp = Date.now();
     return JSON.stringify({
       entities: [
         { id: `ent_${timestamp}_1`, name: "ทวีสิน", type: "PERSON", description: "พนักงานฝ่าย IT", valid_from: new Date().toISOString() },
@@ -35,7 +35,7 @@ const safeExtractGraphData = async (text: string, orgId: string) => {
 
 const safeGenerateEmbeddings = async (texts: string[]) => {
   if (isMock) {
-    return texts.map(() => Array(1024).fill(0.123)); 
+    return texts.map(() => Array(1024).fill(0.123));
   }
   return generateEmbeddings(texts);
 };
@@ -60,8 +60,7 @@ const executeWithRetry = async <T>(operation: () => Promise<T>, retries = 3, del
   throw lastError;
 };
 
-// เปลี่ยนชื่อคิวให้ตรงกับที่เพื่อนตั้งไว้
-const QUEUE_NAME = "ingestion"; 
+const QUEUE_NAME = "ingestion";
 const ingestQueue = new Queue(QUEUE_NAME, {
   connection: {
     host: process.env.REDIS_HOST || "127.0.0.1",
@@ -142,7 +141,7 @@ app.post("/api/memory/ingest/pdf", async ({ body }) => {
     const orgId = organizationId || "org_pdf_default";
     const arrayBuffer = await file.arrayBuffer();
     const chunks = await processPDF(arrayBuffer);
-    
+
     await saveOrganization({ id: orgId, name: "Organization", created_at: new Date().toISOString() });
     const docId = `doc_pdf_${Date.now()}`;
     await saveDocument({ organizationId: orgId, id: docId, title: title || file.name || "Untitled PDF", type: "PDF", language: "TH", authors: ["System"] });
@@ -201,6 +200,100 @@ app.post("/api/memory/ingest/pdf", async ({ body }) => {
   } catch (error: any) { return new Response(JSON.stringify({ error: error.message }), { status: 500 }); }
 });
 
+app.post("/api/memory/ingest/image", async ({ body }) => {
+  try {
+    const { file, organizationId, title } = body as any;
+    if (!file) return new Response(JSON.stringify({ error: "Missing image file" }), { status: 400 });
+
+    const orgId = organizationId || "org_image_default";
+
+    const arrayBuffer = await file.arrayBuffer();
+    const base64Image = Buffer.from(arrayBuffer).toString('base64');
+    const mimeType = file.type || "image/jpeg";
+    const dataUrl = `data:${mimeType};base64,${base64Image}`;
+
+    await saveOrganization({ id: orgId, name: "Organization", created_at: new Date().toISOString() });
+    const docId = `doc_img_${Date.now()}`;
+    await saveDocument({ organizationId: orgId, id: docId, title: title || file.name || "Untitled Image", type: "IMAGE", language: "TH", authors: ["System"] });
+
+    let extractedGraph: any = { text: "ไม่สามารถสกัดข้อความได้", entities: [], relationships: [] };
+
+    if (!isMock) {
+      const aiResponse = await executeWithRetry(() => aiClient.chat.completions.create({
+        model: "anthropic/claude-sonnet-5",
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: `คุณคือผู้เชี่ยวชาญด้านการสกัดข้อมูล จงทำ 2 อย่างจากภาพนี้:
+                1. อ่านข้อความทั้งหมดในภาพ (OCR)
+                2. สกัด Entities (PERSON, ORG, LOCATION, CONCEPT) และ Relationships (WORKS_AT, PART_OF, RELATED_TO ฯลฯ)
+                
+                จงตอบกลับมาเป็น JSON Format รูปแบบนี้เท่านั้น ห้ามมีข้อความอื่นปน:
+                {
+                  "text": "ข้อความที่อ่านได้ทั้งหมด",
+                  "entities": [{ "id": "ent_1", "name": "...", "type": "...", "description": "..." }],
+                  "relationships": [{ "source_id": "ent_1", "target_id": "ent_2", "type": "..." }]
+                }`
+              },
+              {
+                type: "image_url",
+                image_url: { url: dataUrl }
+              }
+            ]
+          }
+        ]
+      }));
+
+      const content = aiResponse.choices[0]?.message?.content || "{}";
+      const cleanJson = content.replace(/```json/g, '').replace(/```/g, '').trim();
+      extractedGraph = JSON.parse(cleanJson);
+    }
+
+    const chunkText = extractedGraph.text || "Image content";
+    const chunkEmbeddings = await executeWithRetry(() => safeGenerateEmbeddings([chunkText]));
+
+    const mentionedEntitiesForChunk: any[] = [];
+    const entities = extractedGraph.entities || [];
+    const relationships = extractedGraph.relationships || [];
+
+    for (const entity of entities) {
+      entity.id = entity.id.startsWith("ent_") ? `${entity.id}_${Date.now()}` : `ent_${Date.now()}`;
+      mentionedEntitiesForChunk.push({
+        entity_id: entity.id, valid_from: new Date().toISOString(), valid_to: null,
+        confidence_score: 0.9, intent_category: "FACT", criticality_score: 0.5, sentiment: "NEUTRAL", clearance_level: 1, expires_at: null, justification: `Extracted from Image`
+      });
+    }
+
+    const chunks = [{
+      id: `chunk_img_${Date.now()}`, source_type: "document", source_id: docId, text: chunkText, sequence_order: 1,
+      embedding: chunkEmbeddings[0] || [], mentioned_entities: mentionedEntitiesForChunk
+    }];
+
+    const formattedRelationships = relationships.map((rel: any) => ({
+      ...rel,
+      source_id: entities.find((e: any) => e.id.includes(rel.source_id))?.id || rel.source_id,
+      target_id: entities.find((e: any) => e.id.includes(rel.target_id))?.id || rel.target_id,
+      type: rel.type.toUpperCase(),
+      valid_from: new Date().toISOString(), valid_to: null,
+      confidence_score: 0.9, intent_category: "FACT", criticality_score: 0.5, sentiment: "NEUTRAL", clearance_level: 1, expires_at: null, justification: "Extracted from Image"
+    }));
+
+    const job = await ingestQueue.add("ingest-image-job", {
+      organizationId: orgId,
+      chunks: chunks,
+      entities: entities,
+      relationships: formattedRelationships
+    });
+
+    return { status: "processing", message: "ส่งภาพให้ Sonnet วิเคราะห์และส่งเข้าคิวสำเร็จ", job_id: job.id };
+  } catch (error: any) {
+    return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+  }
+});
+
 app.post("/api/memory/chat", async ({ body }) => {
   try {
     const { message, organizationId, summary } = body as any;
@@ -252,7 +345,7 @@ app.post("/api/memory/query", async ({ body }) => {
 
     let answer = "", retrievedContext = "";
     let rawResults: any[] = [];
-    
+
     const result = await session.run(
       `MATCH (c:Chunk) WHERE c.organizationId = $orgId AND c.embedding IS NOT NULL AND size(c.embedding) = size($queryEmbedding)
        WITH c, vector.similarity.cosine(c.embedding, $queryEmbedding) AS score ORDER BY score DESC LIMIT 5
@@ -266,7 +359,7 @@ app.post("/api/memory/query", async ({ body }) => {
 
     rawResults = result.records.map((record: any) => ({
       chunk_id: record.get('chunk_id'), document_id: record.get('document_id'), text: record.get('chunkText'), similarity_score: record.get('score'),
-      graph_facts: (record.get('graph_facts') || []).filter((f: string) => f !== null && f.trim() !== "") 
+      graph_facts: (record.get('graph_facts') || []).filter((f: string) => f !== null && f.trim() !== "")
     }));
 
     retrievedContext = rawResults.length > 0 ? rawResults.map(r => `[${r.chunk_id}] ${r.text}` + (r.graph_facts.length > 0 ? `\n[Graph]: ${r.graph_facts.join(", ")}` : "")).join("\n---\n") : "";
@@ -282,7 +375,7 @@ app.post("/api/memory/query", async ({ body }) => {
       }));
       answer = aiResponse.choices[0]?.message?.content || "No generated answer";
     }
-    
+
     return { status: "success", question, answer, citations: rawResults.map((r: any) => ({ document_id: r.document_id, chunk_id: r.chunk_id, text_preview: r.text.substring(0, 50) + "..." })), raw_query_result: rawResults };
   } catch (error: any) { return new Response(JSON.stringify({ error: error.message }), { status: 500 }); }
   finally { await session.close(); }
@@ -299,12 +392,34 @@ app.get("/api/memory/document/:documentId/tree", async ({ params, query }) => {
 
 app.get("/api/memory/entity/:entityName/timeline", async ({ params, query }) => {
   try {
-    const orgId = query.orgId as string || "org_pdf_default";
-    const discoverResults = await discoverEntities({ organizationId: orgId, keyword: params.entityName });
-    if (!discoverResults || discoverResults.length === 0) return { status: "success", search_keyword: params.entityName, timeline: [] };
-    const timeline = await getEntityTimeline({ organizationId: orgId, entityId: discoverResults[0].id });
-    return { status: "success", search_keyword: params.entityName, timeline: timeline };
-  } catch (error: any) { return new Response(JSON.stringify({ error: error.message }), { status: 500 }); }
+    const orgId = query.orgId as string || "org_001";
+    const decodedEntityName = decodeURIComponent(params.entityName);
+    const discoverResults = await discoverEntities({ 
+      organizationId: orgId, 
+      keyword: decodedEntityName 
+    });
+
+    if (!discoverResults || discoverResults.length === 0) {
+      return { 
+        status: "success", 
+        search_keyword: decodedEntityName, 
+        timeline: [] 
+      };
+    }
+
+    const timeline = await getEntityTimeline({ 
+      organizationId: orgId, 
+      entityId: discoverResults[0].id 
+    });
+
+    return { 
+      status: "success", 
+      search_keyword: decodedEntityName, 
+      timeline: timeline 
+    };
+  } catch (error: any) { 
+    return new Response(JSON.stringify({ error: error.message }), { status: 500 }); 
+  }
 });
 
 app.get("/api/memory/discover", async ({ query }) => {
@@ -333,7 +448,7 @@ app.get("/api/memory/documents", async ({ query }) => {
 });
 
 app.delete("/api/memory/document/:documentId", async ({ params }) => {
-  const session = driver.session(); 
+  const session = driver.session();
   try {
     const checkResult = await session.run(`MATCH (d:Document {id: $docId}) RETURN d.id AS id`, { docId: params.documentId });
     if (checkResult.records.length === 0) return new Response(JSON.stringify({ status: "not_found" }), { status: 404 });
