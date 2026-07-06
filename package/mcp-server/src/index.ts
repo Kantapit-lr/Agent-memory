@@ -72,12 +72,15 @@ const app = new Elysia();
 
 app.post("/api/memory/ingest", async ({ body }) => {
   try {
-    const { text, organizationId, documentId, title } = body as any;
+    const { text, organizationId, documentId, title, language, clearance_level } = body as any;
     const chunks = chunkText(text, 2000, 200);
 
     await saveOrganization({ id: organizationId, name: "Organization", created_at: new Date().toISOString() });
     const docId = documentId || `doc_${Date.now()}`;
-    await saveDocument({ organizationId, id: docId, title: title || "Untitled Document", type: "TEXT", language: "TH", authors: ["System"] });
+    const docLang = language || "TH";
+    const cLevel = clearance_level !== undefined ? Number(clearance_level) : 1;
+
+    await saveDocument({ organizationId, id: docId, title: title || "Untitled Document", type: "TEXT", language: docLang, authors: ["System"] });
 
     const allEntities: any[] = [];
     const allChunks: any[] = [];
@@ -102,7 +105,7 @@ app.post("/api/memory/ingest", async ({ body }) => {
             allEntities.push(entity);
             mentionedEntitiesForChunk.push({
               entity_id: entity.id, valid_from: entity.valid_from || new Date().toISOString(), valid_to: null,
-              confidence_score: 0.9, intent_category: "FACT", criticality_score: 0.5, sentiment: "NEUTRAL", clearance_level: 1, expires_at: null, justification: `Extracted chunk: ${chunk.id}`
+              confidence_score: 0.9, intent_category: "FACT", criticality_score: 0.5, sentiment: "NEUTRAL", clearance_level: cLevel, expires_at: null, justification: `Extracted chunk: ${chunk.id}`
             });
           }
 
@@ -115,7 +118,7 @@ app.post("/api/memory/ingest", async ({ body }) => {
             allRelationships.push({
               source_id: rel.source_id, target_id: rel.target_id, type: rel.type.toUpperCase(),
               valid_from: rel.valid_from || new Date().toISOString(), valid_to: rel.valid_to || null,
-              confidence_score: 0.9, intent_category: "FACT", criticality_score: 0.5, sentiment: "NEUTRAL", clearance_level: 1, expires_at: null, justification: "Extracted relationship"
+              confidence_score: 0.9, intent_category: "FACT", criticality_score: 0.5, sentiment: "NEUTRAL", clearance_level: cLevel, expires_at: null, justification: "Extracted relationship"
             });
           }
         } catch (error) { console.error(error); }
@@ -338,7 +341,7 @@ app.post("/api/memory/chat", async ({ body }) => {
 app.post("/api/memory/query", async ({ body }) => {
   const session = driver.session();
   try {
-    const { question, organizationId, activeOnly = false, clearanceLevel = 4 } = body as any;
+    const { question, organizationId, activeOnly = false, clearanceLevel = 4, language } = body as any;
     if (!question || question.trim() === "") return new Response(JSON.stringify({ error: "Missing 'question' field" }), { status: 400 });
 
     const queryEmbeddings = await executeWithRetry(() => safeGenerateEmbeddings([question]));
@@ -348,13 +351,24 @@ app.post("/api/memory/query", async ({ body }) => {
 
     const result = await session.run(
       `MATCH (c:Chunk) WHERE c.organizationId = $orgId AND c.embedding IS NOT NULL AND size(c.embedding) = size($queryEmbedding)
-       WITH c, vector.similarity.cosine(c.embedding, $queryEmbedding) AS score ORDER BY score DESC LIMIT 5
-       OPTIONAL MATCH (d:Document)-[:HAS_CHUNK]->(c)
-       WITH c, score, coalesce(c.source_id, c.sourceId, d.id, "unknown_doc") AS document_id
+       WITH c, vector.similarity.cosine(c.embedding, $queryEmbedding) AS score 
+       
+       // ✨ แก้ WHERE ซ้อนกันให้เป็น AND
+       MATCH (d:Document) 
+       WHERE d.id = coalesce(c.source_id, c.sourceId) 
+         AND ($language IS NULL OR d.language = $language)
+       
+       WITH c, d, score ORDER BY score DESC LIMIT 5
        OPTIONAL MATCH (e1:Entity)-[r]->(e2:Entity)
        WHERE e1.organizationId = $orgId AND c.text CONTAINS e1.name AND ($activeOnly = false OR r.valid_to IS NULL OR r.valid_to = "") AND (r.clearance_level IS NULL OR r.clearance_level <= $clearanceLevel)
-       RETURN c.id AS chunk_id, document_id, c.text AS chunkText, score, collect(DISTINCT e1.name + " [" + type(r) + "] " + e2.name) AS graph_facts`,
-      { orgId: organizationId, queryEmbedding: queryEmbeddings[0], activeOnly: activeOnly === true || activeOnly === "true", clearanceLevel: Number(clearanceLevel) }
+       RETURN c.id AS chunk_id, d.id AS document_id, c.text AS chunkText, score, collect(DISTINCT e1.name + " [" + type(r) + "] " + e2.name) AS graph_facts`,
+      {
+        orgId: organizationId,
+        queryEmbedding: queryEmbeddings[0],
+        activeOnly: activeOnly === true || activeOnly === "true",
+        clearanceLevel: Number(clearanceLevel),
+        language: language || null
+      }
     );
 
     rawResults = result.records.map((record: any) => ({
@@ -394,31 +408,31 @@ app.get("/api/memory/entity/:entityName/timeline", async ({ params, query }) => 
   try {
     const orgId = query.orgId as string || "org_001";
     const decodedEntityName = decodeURIComponent(params.entityName);
-    const discoverResults = await discoverEntities({ 
-      organizationId: orgId, 
-      keyword: decodedEntityName 
+    const discoverResults = await discoverEntities({
+      organizationId: orgId,
+      keyword: decodedEntityName
     });
 
     if (!discoverResults || discoverResults.length === 0) {
-      return { 
-        status: "success", 
-        search_keyword: decodedEntityName, 
-        timeline: [] 
+      return {
+        status: "success",
+        search_keyword: decodedEntityName,
+        timeline: []
       };
     }
 
-    const timeline = await getEntityTimeline({ 
-      organizationId: orgId, 
-      entityId: discoverResults[0].id 
+    const timeline = await getEntityTimeline({
+      organizationId: orgId,
+      entityId: discoverResults[0].id
     });
 
-    return { 
-      status: "success", 
-      search_keyword: decodedEntityName, 
-      timeline: timeline 
+    return {
+      status: "success",
+      search_keyword: decodedEntityName,
+      timeline: timeline
     };
-  } catch (error: any) { 
-    return new Response(JSON.stringify({ error: error.message }), { status: 500 }); 
+  } catch (error: any) {
+    return new Response(JSON.stringify({ error: error.message }), { status: 500 });
   }
 });
 
