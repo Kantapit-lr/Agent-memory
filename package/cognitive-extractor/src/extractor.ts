@@ -99,7 +99,12 @@ CRITICAL RULES:
 7. CRITICAL ENTITY EXTRACTION (NEVER IGNORE):
    - PERSON: You MUST always extract names of people. Do not skip them.
    - ROLE/POSITION: Extract job titles and link them to the PERSON using [HOLDS_POSITION].
-   - ORGANIZATION: Link the PERSON to their company using [WORKS_AT].`;
+   - ORGANIZATION: Link the PERSON to their company using [WORKS_AT].
+8. DYNAMIC COGNITIVE DIMENSIONS: 
+   - 'confidence_score' (0.0-1.0): Evaluate how explicitly and clearly the text states this relationship.
+   - 'criticality_score' (0.0-1.0): Evaluate how critical or important this fact is to the organization.
+   - 'sentiment': Evaluate the tone (POSITIVE, NEGATIVE, NEUTRAL).
+   Do NOT just copy the example values. You MUST analyze and score them dynamically based on the context.`;
 
   const response = await openai.chat.completions.create({
     model: "anthropic/claude-sonnet-4-6",
