@@ -2,7 +2,7 @@ import { Elysia } from "elysia";
 import OpenAI from "openai";
 import { Queue } from "bullmq";
 
-import { chunkText, processPDF } from "../../parser/src";
+import { chunkText, processPDF, processCode} from "../../parser/src";
 import { extractGraphData, generateEmbeddings } from "../../cognitive-extractor/src";
 import driver from "../../adapter/src/db";
 import { saveOrganization } from "../../adapter/src/repositories/nodes/saveOrganization";
@@ -72,12 +72,15 @@ const app = new Elysia();
 
 app.post("/api/memory/ingest", async ({ body }) => {
   try {
-    const { text, organizationId, documentId, title } = body as any;
+    const { text, organizationId, documentId, title, language, clearance_level } = body as any;
     const chunks = chunkText(text, 2000, 200);
 
     await saveOrganization({ id: organizationId, name: "Organization", created_at: new Date().toISOString() });
     const docId = documentId || `doc_${Date.now()}`;
-    await saveDocument({ organizationId, id: docId, title: title || "Untitled Document", type: "TEXT", language: "TH", authors: ["System"] });
+    const docLang = language || "TH";
+    const cLevel = clearance_level !== undefined ? Number(clearance_level) : 1;
+
+    await saveDocument({ organizationId, id: docId, title: title || "Untitled Document", type: "TEXT", language: docLang, authors: ["System"] });
 
     const allEntities: any[] = [];
     const allChunks: any[] = [];
@@ -101,8 +104,16 @@ app.post("/api/memory/ingest", async ({ body }) => {
           for (const entity of entities) {
             allEntities.push(entity);
             mentionedEntitiesForChunk.push({
-              entity_id: entity.id, valid_from: entity.valid_from || new Date().toISOString(), valid_to: null,
-              confidence_score: 0.9, intent_category: "FACT", criticality_score: 0.5, sentiment: "NEUTRAL", clearance_level: 1, expires_at: null, justification: `Extracted chunk: ${chunk.id}`
+              entity_id: entity.id,
+              valid_from: entity.valid_from || new Date().toISOString(),
+              valid_to: entity.valid_to || null,
+              confidence_score: entity.confidence_score ?? 0.9,
+              intent_category: entity.intent_category || "FACT",
+              criticality_score: entity.criticality_score ?? 0.5,
+              sentiment: entity.sentiment || "NEUTRAL",
+              clearance_level: cLevel,
+              expires_at: entity.expires_at || null,
+              justification: entity.justification || `Extracted chunk: ${chunk.id}`
             });
           }
 
@@ -115,10 +126,10 @@ app.post("/api/memory/ingest", async ({ body }) => {
             allRelationships.push({
               source_id: rel.source_id, target_id: rel.target_id, type: rel.type.toUpperCase(),
               valid_from: rel.valid_from || new Date().toISOString(), valid_to: rel.valid_to || null,
-              confidence_score: 0.9, intent_category: "FACT", criticality_score: 0.5, sentiment: "NEUTRAL", clearance_level: 1, expires_at: null, justification: "Extracted relationship"
+              confidence_score: rel.confidence_score ?? 0.9, intent_category: rel.intent_category || "FACT", criticality_score: rel.criticality_score ?? 0.5, sentiment: rel.sentiment || "NEUTRAL", clearance_level: cLevel, expires_at: rel.expires_at || null, justification: rel.justification || "Extracted relationship"
             });
           }
-        } catch (error) { console.error(error); }
+        } catch (error) {}
       }));
     }
 
@@ -129,22 +140,24 @@ app.post("/api/memory/ingest", async ({ body }) => {
       relationships: allRelationships
     });
 
-    return { status: "processing", message: "ประมวลผล AI เสร็จสิ้น และส่งข้อมูลให้ Worker บันทึกลงฐานข้อมูลแล้ว", job_id: job.id };
+    return { status: "processing", message: "Processing completed and sent to worker", job_id: job.id };
   } catch (error: any) { return new Response(JSON.stringify({ error: error.message }), { status: 500 }); }
 });
 
 app.post("/api/memory/ingest/pdf", async ({ body }) => {
   try {
-    const { file, organizationId, title } = body as any;
+    const { file, organizationId, title, language, clearance_level } = body as any;
     if (!file) return new Response(JSON.stringify({ error: "Missing PDF file" }), { status: 400 });
 
     const orgId = organizationId || "org_pdf_default";
+    const docLang = language || "TH";
+    const cLevel = clearance_level !== undefined ? Number(clearance_level) : 1;
     const arrayBuffer = await file.arrayBuffer();
     const chunks = await processPDF(arrayBuffer);
 
     await saveOrganization({ id: orgId, name: "Organization", created_at: new Date().toISOString() });
     const docId = `doc_pdf_${Date.now()}`;
-    await saveDocument({ organizationId: orgId, id: docId, title: title || file.name || "Untitled PDF", type: "PDF", language: "TH", authors: ["System"] });
+    await saveDocument({ organizationId: orgId, id: docId, title: title || file.name || "Untitled PDF", type: "PDF", language: docLang, authors: ["System"] });
 
     const allEntities: any[] = [];
     const allChunks: any[] = [];
@@ -168,8 +181,8 @@ app.post("/api/memory/ingest/pdf", async ({ body }) => {
           for (const entity of entities) {
             allEntities.push(entity);
             mentionedEntitiesForChunk.push({
-              entity_id: entity.id, valid_from: entity.valid_from || new Date().toISOString(), valid_to: null,
-              confidence_score: 0.9, intent_category: "FACT", criticality_score: 0.5, sentiment: "NEUTRAL", clearance_level: 1, expires_at: null, justification: `Extracted chunk: ${chunk.id}`
+              entity_id: entity.id, valid_from: entity.valid_from || new Date().toISOString(), valid_to: entity.valid_to || null,
+              confidence_score: entity.confidence_score ?? 0.9, intent_category: entity.intent_category || "FACT", criticality_score: entity.criticality_score ?? 0.5, sentiment: entity.sentiment || "NEUTRAL", clearance_level: cLevel, expires_at: entity.expires_at || null, justification: entity.justification || `Extracted chunk: ${chunk.id}`
             });
           }
 
@@ -182,10 +195,10 @@ app.post("/api/memory/ingest/pdf", async ({ body }) => {
             allRelationships.push({
               source_id: rel.source_id, target_id: rel.target_id, type: rel.type.toUpperCase(),
               valid_from: rel.valid_from || new Date().toISOString(), valid_to: rel.valid_to || null,
-              confidence_score: 0.9, intent_category: "FACT", criticality_score: 0.5, sentiment: "NEUTRAL", clearance_level: 1, expires_at: null, justification: "Extracted relationship"
+              confidence_score: rel.confidence_score ?? 0.9, intent_category: rel.intent_category || "FACT", criticality_score: rel.criticality_score ?? 0.5, sentiment: rel.sentiment || "NEUTRAL", clearance_level: cLevel, expires_at: rel.expires_at || null, justification: rel.justification || "Extracted relationship"
             });
           }
-        } catch (error) { console.error(error); }
+        } catch (error) {}
       }));
     }
 
@@ -196,16 +209,18 @@ app.post("/api/memory/ingest/pdf", async ({ body }) => {
       relationships: allRelationships
     });
 
-    return { status: "processing", message: "ประมวลผล PDF เสร็จสิ้น และส่งข้อมูลให้ Worker บันทึกลงฐานข้อมูลแล้ว", job_id: job.id };
+    return { status: "processing", message: "Processing completed and sent to worker", job_id: job.id };
   } catch (error: any) { return new Response(JSON.stringify({ error: error.message }), { status: 500 }); }
 });
 
 app.post("/api/memory/ingest/image", async ({ body }) => {
   try {
-    const { file, organizationId, title } = body as any;
+    const { file, organizationId, title, language, clearance_level } = body as any;
     if (!file) return new Response(JSON.stringify({ error: "Missing image file" }), { status: 400 });
 
     const orgId = organizationId || "org_image_default";
+    const docLang = language || "TH";
+    const cLevel = clearance_level !== undefined ? Number(clearance_level) : 1;
 
     const arrayBuffer = await file.arrayBuffer();
     const base64Image = Buffer.from(arrayBuffer).toString('base64');
@@ -214,7 +229,7 @@ app.post("/api/memory/ingest/image", async ({ body }) => {
 
     await saveOrganization({ id: orgId, name: "Organization", created_at: new Date().toISOString() });
     const docId = `doc_img_${Date.now()}`;
-    await saveDocument({ organizationId: orgId, id: docId, title: title || file.name || "Untitled Image", type: "IMAGE", language: "TH", authors: ["System"] });
+    await saveDocument({ organizationId: orgId, id: docId, title: title || file.name || "Untitled Image", type: "IMAGE", language: docLang, authors: ["System"] });
 
     let extractedGraph: any = { text: "ไม่สามารถสกัดข้อความได้", entities: [], relationships: [] };
 
@@ -229,13 +244,13 @@ app.post("/api/memory/ingest/image", async ({ body }) => {
                 type: "text",
                 text: `คุณคือผู้เชี่ยวชาญด้านการสกัดข้อมูล จงทำ 2 อย่างจากภาพนี้:
                 1. อ่านข้อความทั้งหมดในภาพ (OCR)
-                2. สกัด Entities (PERSON, ORG, LOCATION, CONCEPT) และ Relationships (WORKS_AT, PART_OF, RELATED_TO ฯลฯ)
+                2. สกัด Entities (PERSON, ORG, LOCATION, CONCEPT) และ Relationships (WORKS_AT, PART_OF, RELATED_TO ฯลฯ)พร้อมมิติการรับรู้
                 
                 จงตอบกลับมาเป็น JSON Format รูปแบบนี้เท่านั้น ห้ามมีข้อความอื่นปน:
                 {
                   "text": "ข้อความที่อ่านได้ทั้งหมด",
-                  "entities": [{ "id": "ent_1", "name": "...", "type": "...", "description": "..." }],
-                  "relationships": [{ "source_id": "ent_1", "target_id": "ent_2", "type": "..." }]
+                  "entities": [{ "id": "ent_1", "name": "...", "type": "...", "description": "...", "confidence_score": 0.9, "intent_category": "FACT", "criticality_score": 0.5, "sentiment": "NEUTRAL", "expires_at": null, "justification": "..." }],
+                  "relationships": [{ "source_id": "ent_1", "target_id": "ent_2", "type": "...", "confidence_score": 0.9, "intent_category": "FACT", "criticality_score": 0.5, "sentiment": "NEUTRAL", "expires_at": null, "justification": "..." }]
                 }`
               },
               {
@@ -262,8 +277,8 @@ app.post("/api/memory/ingest/image", async ({ body }) => {
     for (const entity of entities) {
       entity.id = entity.id.startsWith("ent_") ? `${entity.id}_${Date.now()}` : `ent_${Date.now()}`;
       mentionedEntitiesForChunk.push({
-        entity_id: entity.id, valid_from: new Date().toISOString(), valid_to: null,
-        confidence_score: 0.9, intent_category: "FACT", criticality_score: 0.5, sentiment: "NEUTRAL", clearance_level: 1, expires_at: null, justification: `Extracted from Image`
+        entity_id: entity.id, valid_from: entity.valid_from || new Date().toISOString(), valid_to: entity.valid_to || null,
+        confidence_score: entity.confidence_score ?? 0.9, intent_category: entity.intent_category || "FACT", criticality_score: entity.criticality_score ?? 0.5, sentiment: entity.sentiment || "NEUTRAL", clearance_level: cLevel, expires_at: entity.expires_at || null, justification: entity.justification || `Extracted from Image`
       });
     }
 
@@ -277,8 +292,8 @@ app.post("/api/memory/ingest/image", async ({ body }) => {
       source_id: entities.find((e: any) => e.id.includes(rel.source_id))?.id || rel.source_id,
       target_id: entities.find((e: any) => e.id.includes(rel.target_id))?.id || rel.target_id,
       type: rel.type.toUpperCase(),
-      valid_from: new Date().toISOString(), valid_to: null,
-      confidence_score: 0.9, intent_category: "FACT", criticality_score: 0.5, sentiment: "NEUTRAL", clearance_level: 1, expires_at: null, justification: "Extracted from Image"
+      valid_from: rel.valid_from || new Date().toISOString(), valid_to: rel.valid_to || null,
+      confidence_score: rel.confidence_score ?? 0.9, intent_category: rel.intent_category || "FACT", criticality_score: rel.criticality_score ?? 0.5, sentiment: rel.sentiment || "NEUTRAL", clearance_level: cLevel, expires_at: rel.expires_at || null, justification: rel.justification || "Extracted from Image"
     }));
 
     const job = await ingestQueue.add("ingest-image-job", {
@@ -288,18 +303,102 @@ app.post("/api/memory/ingest/image", async ({ body }) => {
       relationships: formattedRelationships
     });
 
-    return { status: "processing", message: "ส่งภาพให้ Sonnet วิเคราะห์และส่งเข้าคิวสำเร็จ", job_id: job.id };
+    return { status: "processing", message: "Processing completed and sent to worker", job_id: job.id };
   } catch (error: any) {
     return new Response(JSON.stringify({ error: error.message }), { status: 500 });
   }
 });
 
+app.post("/api/memory/ingest/code", async ({ body }) => {
+  try {
+    const { code, fileName, organizationId, clearance_level } = body as any;
+    if (!code) return new Response(JSON.stringify({ error: "Missing code field" }), { status: 400 });
+
+    const orgId = organizationId || "org_code_default";
+    const cLevel = clearance_level !== undefined ? Number(clearance_level) : 1;
+    const docId = `doc_code_${Date.now()}`;
+
+    await saveOrganization({ id: orgId, name: "Organization", created_at: new Date().toISOString() });
+    await saveDocument({ organizationId: orgId, id: docId, title: fileName || "Untitled_Code.js", type: "CODE", language: "CODE", authors: ["System"] });
+
+    const chunks = await processCode(code);
+
+    const allEntities: any[] = [];
+    const allChunks: any[] = [];
+    const allRelationships: any[] = [];
+
+    const CONCURRENCY_LIMIT = 4;
+    for (let i = 0; i < chunks.length; i += CONCURRENCY_LIMIT) {
+      const batch = chunks.slice(i, i + CONCURRENCY_LIMIT);
+      await Promise.all(batch.map(async (chunk) => {
+        try {
+          const chunkEmbeddings = await executeWithRetry(() => safeGenerateEmbeddings([chunk.text]));
+
+          const mentionedEntitiesForChunk: any[] = [];
+          const ast = chunk.ast_metadata;
+
+          if (ast) {
+            const subjectId = `ent_code_${ast.name || chunk.id}`;
+            if (ast.name) {
+              allEntities.push({
+                id: subjectId, name: ast.name, type: ast.type === "class" ? "CLASS" : "FUNCTION", description: `Code block from ${fileName || "file"}`,
+                valid_from: new Date().toISOString(), valid_to: null
+              });
+              mentionedEntitiesForChunk.push({
+                entity_id: subjectId, valid_from: new Date().toISOString(), valid_to: null,
+                confidence_score: 1.0, intent_category: "FACT", criticality_score: 0.8, sentiment: "NEUTRAL", clearance_level: cLevel, expires_at: null, justification: "AST Extraction"
+              });
+            }
+
+            if (ast.imports && ast.imports.length > 0) {
+              ast.imports.forEach((imp: string) => {
+                const targetId = `ent_module_${imp.replace(/[^a-zA-Z0-9]/g, "_")}`;
+                allEntities.push({ id: targetId, name: imp, type: "MODULE", description: "Imported dependency", valid_from: new Date().toISOString(), valid_to: null });
+                allRelationships.push({
+                  source_id: subjectId, target_id: targetId, type: "IMPORTS", valid_from: new Date().toISOString(), valid_to: null,
+                  confidence_score: 1.0, intent_category: "FACT", criticality_score: 0.8, sentiment: "NEUTRAL", clearance_level: cLevel, expires_at: null, justification: "AST Import"
+                });
+              });
+            }
+
+            if (ast.calls && ast.calls.length > 0) {
+              ast.calls.forEach((funcCall: string) => {
+                const targetId = `ent_func_${funcCall}`;
+                allEntities.push({ id: targetId, name: funcCall, type: "FUNCTION", description: "Called function", valid_from: new Date().toISOString(), valid_to: null });
+                allRelationships.push({
+                  source_id: subjectId, target_id: targetId, type: "CALLS", valid_from: new Date().toISOString(), valid_to: null,
+                  confidence_score: 1.0, intent_category: "FACT", criticality_score: 0.8, sentiment: "NEUTRAL", clearance_level: cLevel, expires_at: null, justification: "AST Function Call"
+                });
+              });
+            }
+          }
+
+          allChunks.push({
+            id: chunk.id, source_type: "document", source_id: docId, text: chunk.text, sequence_order: chunk.sequence_order,
+            embedding: chunkEmbeddings[0] || [], mentioned_entities: mentionedEntitiesForChunk
+          });
+        } catch (error) {}
+      }));
+    }
+
+    const job = await ingestQueue.add("ingest-code-job", {
+      organizationId: orgId,
+      chunks: allChunks,
+      entities: allEntities,
+      relationships: allRelationships
+    });
+
+    return { status: "processing", message: "AST Code Extraction completed without LLM and sent to worker", job_id: job.id };
+  } catch (error: any) { return new Response(JSON.stringify({ error: error.message }), { status: 500 }); }
+});
+
 app.post("/api/memory/chat", async ({ body }) => {
   try {
-    const { message, organizationId, summary } = body as any;
+    const { message, organizationId, summary, clearance_level } = body as any;
     if (!message) return new Response(JSON.stringify({ error: "Missing message field" }), { status: 400 });
 
     const orgId = organizationId || "org_chat_default";
+    const cLevel = clearance_level !== undefined ? Number(clearance_level) : 1;
     await saveOrganization({ id: orgId, name: "Organization", created_at: new Date().toISOString() });
 
     const episodeId = `ep_${Date.now()}`;
@@ -319,8 +418,8 @@ app.post("/api/memory/chat", async ({ body }) => {
       const entity = entities[k];
       await executeWithRetry(() => saveEntity({ organizationId: orgId, id: entity.id, name: entity.name, type: entity.type.toUpperCase(), description: entity.description || "" }));
       mentionedEntitiesForChunk.push({
-        entity_id: entity.id, valid_from: entity.valid_from || new Date().toISOString(), valid_to: null,
-        confidence_score: 0.9, intent_category: "FACT", criticality_score: 0.5, sentiment: "NEUTRAL", clearance_level: 1, expires_at: null, justification: `Extracted from chat`
+        entity_id: entity.id, valid_from: entity.valid_from || new Date().toISOString(), valid_to: entity.valid_to || null,
+        confidence_score: entity.confidence_score ?? 0.9, intent_category: entity.intent_category || "FACT", criticality_score: entity.criticality_score ?? 0.5, sentiment: entity.sentiment || "NEUTRAL", clearance_level: cLevel, expires_at: entity.expires_at || null, justification: entity.justification || `Extracted from chat`
       });
     }
 
@@ -328,17 +427,17 @@ app.post("/api/memory/chat", async ({ body }) => {
     await executeWithRetry(() => saveChunk({ organizationId: orgId, id: chunkId, source_type: "episode", source_id: episodeId, text: message, sequence_order: 1, embedding: chunkEmbeddings[0] || [], mentioned_entities: mentionedEntitiesForChunk }));
 
     for (const rel of relationships) {
-      await executeWithRetry(() => syncRelationship({ organizationId: orgId, source_id: rel.source_id, target_id: rel.target_id, type: rel.type.toUpperCase(), valid_from: rel.valid_from || new Date().toISOString(), valid_to: rel.valid_to || null, confidence_score: 0.9, intent_category: "FACT", criticality_score: 0.5, sentiment: "NEUTRAL", clearance_level: 1, expires_at: null, justification: "Learned from chat" }));
+      await executeWithRetry(() => syncRelationship({ organizationId: orgId, source_id: rel.source_id, target_id: rel.target_id, type: rel.type.toUpperCase(), valid_from: rel.valid_from || new Date().toISOString(), valid_to: rel.valid_to || null, confidence_score: rel.confidence_score ?? 0.9, intent_category: rel.intent_category || "FACT", criticality_score: rel.criticality_score ?? 0.5, sentiment: rel.sentiment || "NEUTRAL", clearance_level: cLevel, expires_at: rel.expires_at || null, justification: rel.justification || "Learned from chat" }));
     }
 
-    return { status: "success", message: "บันทึกความจำจากแชทสำเร็จ", episode_id: episodeId, metrics: { entities: entities.length, relationships: relationships.length } };
+    return { status: "success", message: "Processing completed", episode_id: episodeId, metrics: { entities: entities.length, relationships: relationships.length } };
   } catch (error: any) { return new Response(JSON.stringify({ error: error.message }), { status: 500 }); }
 });
 
 app.post("/api/memory/query", async ({ body }) => {
   const session = driver.session();
   try {
-    const { question, organizationId, activeOnly = false, clearanceLevel = 4 } = body as any;
+    const { question, organizationId, activeOnly = false, clearanceLevel = 4, language } = body as any;
     if (!question || question.trim() === "") return new Response(JSON.stringify({ error: "Missing 'question' field" }), { status: 400 });
 
     const queryEmbeddings = await executeWithRetry(() => safeGenerateEmbeddings([question]));
@@ -348,13 +447,21 @@ app.post("/api/memory/query", async ({ body }) => {
 
     const result = await session.run(
       `MATCH (c:Chunk) WHERE c.organizationId = $orgId AND c.embedding IS NOT NULL AND size(c.embedding) = size($queryEmbedding)
-       WITH c, vector.similarity.cosine(c.embedding, $queryEmbedding) AS score ORDER BY score DESC LIMIT 5
-       OPTIONAL MATCH (d:Document)-[:HAS_CHUNK]->(c)
-       WITH c, score, coalesce(c.source_id, c.sourceId, d.id, "unknown_doc") AS document_id
+       WITH c, vector.similarity.cosine(c.embedding, $queryEmbedding) AS score 
+       MATCH (d:Document) 
+       WHERE d.id = coalesce(c.source_id, c.sourceId) 
+         AND ($language IS NULL OR d.language = $language)
+       WITH c, d, score ORDER BY score DESC LIMIT 5
        OPTIONAL MATCH (e1:Entity)-[r]->(e2:Entity)
        WHERE e1.organizationId = $orgId AND c.text CONTAINS e1.name AND ($activeOnly = false OR r.valid_to IS NULL OR r.valid_to = "") AND (r.clearance_level IS NULL OR r.clearance_level <= $clearanceLevel)
-       RETURN c.id AS chunk_id, document_id, c.text AS chunkText, score, collect(DISTINCT e1.name + " [" + type(r) + "] " + e2.name) AS graph_facts`,
-      { orgId: organizationId, queryEmbedding: queryEmbeddings[0], activeOnly: activeOnly === true || activeOnly === "true", clearanceLevel: Number(clearanceLevel) }
+       RETURN c.id AS chunk_id, d.id AS document_id, c.text AS chunkText, score, collect(DISTINCT e1.name + " [" + type(r) + "] " + e2.name) AS graph_facts`,
+      {
+        orgId: organizationId,
+        queryEmbedding: queryEmbeddings[0],
+        activeOnly: activeOnly === true || activeOnly === "true",
+        clearanceLevel: Number(clearanceLevel),
+        language: language || null
+      }
     );
 
     rawResults = result.records.map((record: any) => ({
@@ -394,31 +501,31 @@ app.get("/api/memory/entity/:entityName/timeline", async ({ params, query }) => 
   try {
     const orgId = query.orgId as string || "org_001";
     const decodedEntityName = decodeURIComponent(params.entityName);
-    const discoverResults = await discoverEntities({ 
-      organizationId: orgId, 
-      keyword: decodedEntityName 
+    const discoverResults = await discoverEntities({
+      organizationId: orgId,
+      keyword: decodedEntityName
     });
 
     if (!discoverResults || discoverResults.length === 0) {
-      return { 
-        status: "success", 
-        search_keyword: decodedEntityName, 
-        timeline: [] 
+      return {
+        status: "success",
+        search_keyword: decodedEntityName,
+        timeline: []
       };
     }
 
-    const timeline = await getEntityTimeline({ 
-      organizationId: orgId, 
-      entityId: discoverResults[0].id 
+    const timeline = await getEntityTimeline({
+      organizationId: orgId,
+      entityId: discoverResults[0].id
     });
 
-    return { 
-      status: "success", 
-      search_keyword: decodedEntityName, 
-      timeline: timeline 
+    return {
+      status: "success",
+      search_keyword: decodedEntityName,
+      timeline: timeline
     };
-  } catch (error: any) { 
-    return new Response(JSON.stringify({ error: error.message }), { status: 500 }); 
+  } catch (error: any) {
+    return new Response(JSON.stringify({ error: error.message }), { status: 500 });
   }
 });
 
