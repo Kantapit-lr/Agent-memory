@@ -63,7 +63,7 @@ export async function semanticSearch(data: SemanticSearchInput): Promise<Semanti
       }
     )
 
-    return result.records.map((record): SemanticSearchResult => ({
+    return result.records.map((record: any): SemanticSearchResult => ({
       chunkId: record.get("chunkId") as string,
       text: record.get("text") as string,
       similarityScore: record.get("similarityScore") as number,

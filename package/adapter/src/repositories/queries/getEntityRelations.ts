@@ -6,13 +6,18 @@ export async function getEntityRelations(data: GetEntityRelationsInput): Promise
   const session = driver.session()
 
   try {
-    // citation: หา chunk ที่ MENTIONS ทั้ง source และ target entity พร้อมกัน
-    // เพื่อให้ได้ chunk ที่เป็นที่มาของ relationship จริงๆ ไม่ใช่แค่ chunk ที่พูดถึง entity ฝั่งใดฝั่งหนึ่ง
+    // citation: หา chunk ที่เป็นที่มาของ relationship แบบ fallback 2 ชั้น
+    // ชั้น 1 (เข้มงวด): หา chunk ที่ MENTIONS ทั้ง source และ target พร้อมกัน
+    // ชั้น 2 (fallback): ถ้าไม่เจอ → ใช้ chunk ที่ MENTIONS แค่ source ฝั่งเดียวแทน
+    // ดีกว่าคืน null เสมอ เพราะ Agent ยังรู้ที่มาบางส่วนได้
     const query = `
       MATCH (e:Entity {organizationId: $organizationId, id: $entityId})
       OPTIONAL MATCH (e)-[r]->(target:Entity {organizationId: $organizationId})
-      OPTIONAL MATCH (chunk:Chunk {organizationId: $organizationId})-[:MENTIONS]->(e)
-        WHERE (chunk)-[:MENTIONS]->(target)
+      OPTIONAL MATCH (bothChunk:Chunk {organizationId: $organizationId})-[:MENTIONS]->(e)
+        WHERE (bothChunk)-[:MENTIONS]->(target)
+      OPTIONAL MATCH (singleChunk:Chunk {organizationId: $organizationId})-[:MENTIONS]->(e)
+      WITH e, r, target,
+           CASE WHEN bothChunk IS NOT NULL THEN bothChunk ELSE singleChunk END AS chunk
       OPTIONAL MATCH (doc:Document {organizationId: $organizationId})-[:HAS_CHUNK]->(chunk)
       RETURN
         e IS NOT NULL AS entityExists,

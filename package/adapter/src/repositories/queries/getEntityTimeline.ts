@@ -25,8 +25,13 @@ export async function getEntityTimeline(data: GetEntityTimelineInput): Promise<E
     ORDER BY r.valid_from ASC
   `
 
+  // fallback 2 ชั้น เหมือน getEntityRelations
   const citationMatch = `
-    OPTIONAL MATCH (chunk:Chunk {organizationId: $organizationId})-[:MENTIONS]->(e)
+    OPTIONAL MATCH (bothChunk:Chunk {organizationId: $organizationId})-[:MENTIONS]->(e)
+      WHERE (bothChunk)-[:MENTIONS]->(target)
+    OPTIONAL MATCH (singleChunk:Chunk {organizationId: $organizationId})-[:MENTIONS]->(e)
+    WITH e, r, target,
+         CASE WHEN bothChunk IS NOT NULL THEN bothChunk ELSE singleChunk END AS chunk
     OPTIONAL MATCH (doc:Document {organizationId: $organizationId})-[:HAS_CHUNK]->(chunk)
   `
 

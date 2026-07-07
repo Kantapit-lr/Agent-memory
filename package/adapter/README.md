@@ -413,6 +413,79 @@ const filtered = await getEntityTimeline({
 
 ---
 
+### 6. `semanticSearch`
+
+ค้นหา Chunk ที่ใกล้เคียงกับ query มากที่สุด โดยใช้ Vector Similarity (Cosine) พร้อม filter activeOnly, clearanceLevel, langFilter
+
+**หมายเหตุ:** ฝั่งที่เรียกต้องแปลง query text เป็น Vector ด้วย Cohere ก่อน แล้วค่อยส่ง `queryEmbedding` มา adapter ไม่ได้ทำ embedding เองให้
+
+```typescript
+import { semanticSearch } from "@memory-layer/storage-adapter/queries/semanticSearch"
+
+const results = await semanticSearch({
+  organizationId: "org_001",
+  queryEmbedding: [0.1, 0.2, ...],  // Vector 1024 มิติจาก Cohere
+  limit: 5,                           // default 5
+  activeOnly: true,                   // เอาเฉพาะ MENTIONS ที่ valid_to IS NULL
+  minClearanceLevel: 2,              // เฉพาะ clearance_level <= 2
+  langFilter: "TH"                   // กรองเฉพาะ Document ภาษาไทย (optional)
+})
+```
+
+| Field | Type | คำอธิบาย |
+|---|---|---|
+| chunkId | string | รหัส Chunk |
+| text | string | เนื้อหาข้อความ |
+| similarityScore | number | คะแนนความใกล้เคียง (0.0 - 1.0) |
+| sourceType | string \| null | "document" หรือ "episode" |
+| sourceId | string \| null | รหัสต้นทาง |
+| documentTitle | string \| null | ชื่อ Document (ถ้า source เป็น document) |
+| mentionedEntities | object[] | Entity ที่ถูก mention ใน chunk นี้ (ผ่าน filter แล้ว) |
+
+**⚠️ ต้องรัน `setup-indexes.ts` ก่อน** เพื่อสร้าง Vector Index `chunk_embedding` ใน Neo4j
+
+---
+
+### 7. `getCodeDependencies`
+
+ไต่กราฟ `[:CALLS]` และ `[:IMPORTS]` เพื่อหา dependency ของ Function/Module ใช้ Cypher Variable Length Path ไม่มี LLM เกี่ยวข้อง (Deterministic 100%)
+
+**ต้องการ:** Entity ที่มี `type = "FUNCTION"`, `"MODULE"`, หรือ `"CLASS"` ในระบบ (สร้างโดย `/api/memory/ingest/code`)
+
+```typescript
+import { getCodeDependencies } from "@memory-layer/storage-adapter/queries/getCodeDependencies"
+
+const result = await getCodeDependencies({
+  organizationId: "org_001",
+  entityId: "ent_code_validateToken",
+  direction: "outgoing",  // "outgoing" | "incoming" | "both" (default)
+  maxDepth: 3             // default 3
+})
+```
+
+| Field | Type | คำอธิบาย |
+|---|---|---|
+| rootEntityId | string | Entity ต้นทางที่ถามเข้ามา |
+| rootEntityName | string | ชื่อ Entity ต้นทาง |
+| direction | string | ทิศทางที่ค้นหา |
+| dependencies | CodeDependencyNode[] | รายการ dependency ทั้งหมด |
+
+**`CodeDependencyNode` แต่ละตัวมี:**
+
+| Field | Type | คำอธิบาย |
+|---|---|---|
+| entityId | string | รหัส Entity |
+| entityName | string | ชื่อ Entity |
+| entityType | string | FUNCTION, MODULE, CLASS |
+| relationshipType | string | CALLS หรือ IMPORTS |
+| depth | number | ชั้นที่เจอ (1 = direct, 2 = transitive) |
+| source_chunk_id | string \| null | Citation |
+| source_document_id | string \| null | Citation |
+
+**⚠️ Error ที่อาจเกิดขึ้น:** `EntityNotFoundError` (ถ้า entity ไม่มีอยู่ หรือ type ไม่ใช่ FUNCTION/MODULE/CLASS)
+
+---
+
 ## 🗑 Delete API
 
 ฟังก์ชันลบ ทุกตัวรับ object เดียว มี `force` (optional, default = false) ควบคุมว่าจะ cascade delete หรือไม่
