@@ -109,6 +109,18 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
+        name: "get_document_tree",
+        description: "ดึงโครงสร้างเอกสารทั้งฉบับพร้อม Chunk ข้อความทั้งหมดเรียงตามลำดับ (Deterministic) เพื่อดูเนื้อหาเต็ม",
+        inputSchema: {
+          type: "object",
+          properties: {
+            organizationId: { type: "string", description: "รหัสองค์กร (ถ้าไม่ใส่จะใช้ค่าเริ่มต้น)" },
+            documentId: { type: "string", description: "รหัสเอกสารต้นฉบับ เช่น doc_01" }
+          },
+          required: ["documentId"]
+        }
+      },
+      {
         name: "log_episode",
         description: "บันทึกเหตุการณ์ ประวัติการแชท หรือ Episode ลงในระบบความจำ",
         inputSchema: {
@@ -125,12 +137,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   };
 });
 
-// 2. จัดการเมื่อ Agent สั่งเรียกใช้เครื่องมือ
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
   try {
-    // --- ของเดิม ---
     if (name === "query_memory") {
       const response = await fetch(`${API_BASE_URL}/query`, {
         method: "POST",
@@ -152,7 +162,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
     }
 
-    // --- ของใหม่ ---
     else if (name === "justify_intent") {
       const response = await fetch(`${API_BASE_URL}/intent`, {
         method: "POST",
@@ -164,7 +173,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     else if (name === "discover_nodes") {
-      // ใช้ POST ตาม API ที่เราเพิ่งสร้างใหม่ไป
       const response = await fetch(`${API_BASE_URL}/discover`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -217,7 +225,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const data = await response.json();
       return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
     }
-    
+
     else if (name === "semantic_search") {
       const response = await fetch(`${API_BASE_URL}/semantic_search`, {
         method: "POST",
@@ -228,6 +236,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           limit: args?.limit
         })
       });
+      const data = await response.json();
+      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    }
+
+    else if (name === "get_document_tree") {
+      const docId = encodeURIComponent(String(args?.documentId));
+      let url = `${API_BASE_URL}/document/${docId}/tree`;
+      
+      if (args?.organizationId) {
+        url += `?orgId=${encodeURIComponent(String(args?.organizationId))}`;
+      }
+
+      const response = await fetch(url);
       const data = await response.json();
       return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
     }

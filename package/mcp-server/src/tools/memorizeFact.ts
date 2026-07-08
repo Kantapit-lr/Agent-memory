@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import { saveEntity } from "../../../adapter/src/repositories/nodes/saveEntity";
 import { syncRelationship } from "../../../adapter/src/repositories/semantic";
+import OpenAI from "openai";
 
 export interface FactPayload {
   subject: string;
@@ -15,19 +16,29 @@ const generateId = (prefix: string, name: string) =>
 
 export async function memorizeFact(payload: FactPayload) {
   const orgId = payload.organizationId || "org_001";
-  
   const relType = payload.predicate.toUpperCase().replace(/\s+/g, '_').replace(/[^A-Z_]/g, '');
 
   const subjectId = generateId("ent_mem", payload.subject);
   const objectId = generateId("ent_mem", payload.object);
 
+  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
   try {
+    const [subEmbedRes, objEmbedRes] = await Promise.all([
+      openai.embeddings.create({ model: "text-embedding-3-small", input: payload.subject }),
+      openai.embeddings.create({ model: "text-embedding-3-small", input: payload.object })
+    ]);
+
+    const subjectEmbedding = subEmbedRes.data[0].embedding;
+    const objectEmbedding = objEmbedRes.data[0].embedding;
+
     await saveEntity({
       organizationId: orgId,
       id: subjectId,
       name: payload.subject,
       type: "CONCEPT",
-      description: "Entity ที่ถูกสร้างจาก memorize_fact"
+      description: "Entity ที่ถูกสร้างจาก memorize_fact",
+      embedding: subjectEmbedding
     });
 
     await saveEntity({
@@ -35,7 +46,8 @@ export async function memorizeFact(payload: FactPayload) {
       id: objectId,
       name: payload.object,
       type: "CONCEPT",
-      description: "Entity ที่ถูกสร้างจาก memorize_fact"
+      description: "Entity ที่ถูกสร้างจาก memorize_fact",
+      embedding: objectEmbedding
     });
 
     await syncRelationship({
@@ -55,7 +67,7 @@ export async function memorizeFact(payload: FactPayload) {
     });
 
     return {
-      message: "Fact memorized successfully via Storage Adapter",
+      message: "Fact memorized successfully with Entity Resolution",
       saved_data: {
         subject: payload.subject,
         relation: relType,
