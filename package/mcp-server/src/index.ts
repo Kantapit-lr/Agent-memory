@@ -2,7 +2,7 @@ import { Elysia } from "elysia";
 import OpenAI from "openai";
 import { Queue } from "bullmq";
 
-import { chunkText, processPDF, processCode} from "../../parser/src";
+import { chunkText, processPDF, processCode } from "../../parser/src";
 import { extractGraphData, generateEmbeddings } from "../../cognitive-extractor/src";
 import driver from "../../adapter/src/db";
 import { saveOrganization } from "../../adapter/src/repositories/nodes/saveOrganization";
@@ -18,6 +18,8 @@ import { justifyIntent } from "./tools/justifyIntent";
 import { discoverNodes } from "./tools/discoverNodes";
 import { memorizeFact } from "./tools/memorizeFact";
 import { logEpisode } from "./tools/logEpisode";
+import { getCodeDependencies } from "../../adapter/src/repositories/queries/getCodeDependencies";
+import { semanticSearch } from "../../adapter/src/repositories/queries/semanticSearch";
 
 const isMock = process.env.USE_MOCK_AI === "true";
 
@@ -133,7 +135,7 @@ app.post("/api/memory/ingest", async ({ body }) => {
               confidence_score: rel.confidence_score ?? 0.9, intent_category: rel.intent_category || "FACT", criticality_score: rel.criticality_score ?? 0.5, sentiment: rel.sentiment || "NEUTRAL", clearance_level: cLevel, expires_at: rel.expires_at || null, justification: rel.justification || "Extracted relationship"
             });
           }
-        } catch (error) {}
+        } catch (error) { }
       }));
     }
 
@@ -202,7 +204,7 @@ app.post("/api/memory/ingest/pdf", async ({ body }) => {
               confidence_score: rel.confidence_score ?? 0.9, intent_category: rel.intent_category || "FACT", criticality_score: rel.criticality_score ?? 0.5, sentiment: rel.sentiment || "NEUTRAL", clearance_level: cLevel, expires_at: rel.expires_at || null, justification: rel.justification || "Extracted relationship"
             });
           }
-        } catch (error) {}
+        } catch (error) { }
       }));
     }
 
@@ -381,7 +383,7 @@ app.post("/api/memory/ingest/code", async ({ body }) => {
             id: chunk.id, source_type: "document", source_id: docId, text: chunk.text, sequence_order: chunk.sequence_order,
             embedding: chunkEmbeddings[0] || [], mentioned_entities: mentionedEntitiesForChunk
           });
-        } catch (error) {}
+        } catch (error) { }
       }));
     }
 
@@ -589,13 +591,13 @@ app.post("/api/memory/intent", async ({ body }) => {
 app.post("/api/memory/discover", async ({ body }) => {
   try {
     const { keyword } = body as any;
-    
+
     if (!keyword) {
       return new Response(JSON.stringify({ error: "Missing keyword field" }), { status: 400 });
     }
 
     const nodes = await discoverNodes(keyword);
-    
+
     return {
       status: "success",
       results: nodes,
@@ -609,15 +611,18 @@ app.post("/api/memory/discover", async ({ body }) => {
 app.post("/api/memory/memorize", async ({ body }) => {
   try {
     const payload = body as any;
-    
+
     if (!payload.subject || !payload.predicate || !payload.object || !payload.context) {
-      return new Response(JSON.stringify({ 
-        error: "Missing required fields. Please provide subject, predicate, object, and context." 
+      return new Response(JSON.stringify({
+        error: "Missing required fields. Please provide subject, predicate, object, and context."
       }), { status: 400 });
     }
 
-    const result = await memorizeFact(payload);
-    
+    const result = await memorizeFact({
+      ...payload,
+      organizationId: payload.organizationId || "org_001" // บังคับใส่ค่าเริ่มต้นถ้าไม่มี
+    });
+
     return {
       status: "success",
       ...result
@@ -630,18 +635,82 @@ app.post("/api/memory/memorize", async ({ body }) => {
 app.post("/api/memory/episode", async ({ body }) => {
   try {
     const payload = body as any;
-    
+
     if (!payload.summary) {
-      return new Response(JSON.stringify({ 
-        error: "Missing required field: summary" 
+      return new Response(JSON.stringify({
+        error: "Missing required field: summary"
       }), { status: 400 });
     }
 
-    const result = await logEpisode(payload);
-    
+    const result = await logEpisode({
+      ...payload,
+      organizationId: payload.organizationId || "org_001"
+    });
+
     return {
       status: "success",
       ...result
+    };
+  } catch (error: any) {
+    return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+  }
+});
+
+app.post("/api/memory/dependencies", async ({ body }) => {
+  try {
+    const { organizationId, entityId, direction, maxDepth } = body as any;
+
+    if (!organizationId || !entityId) {
+      return new Response(JSON.stringify({
+        error: "Missing required fields: organizationId and entityId are required."
+      }), { status: 400 });
+    }
+
+    const result = await getCodeDependencies({
+      organizationId,
+      entityId,
+      direction: direction || "both",
+      maxDepth: maxDepth || 3
+    });
+
+    return {
+      status: "success",
+      data: result
+    };
+  } catch (error: any) {
+    return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+  }
+});
+
+app.post("/api/memory/semantic_search", async ({ body }) => {
+  try {
+    const { organizationId, query, limit, activeOnly, minClearanceLevel } = body as any;
+
+    if (!organizationId || !query) {
+      return new Response(JSON.stringify({ 
+        error: "Missing required fields: organizationId and query" 
+      }), { status: 400 });
+    }
+
+    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const embeddingResponse = await openai.embeddings.create({
+      model: "text-embedding-3-small",
+      input: query,
+    });
+    
+    const queryEmbedding = embeddingResponse.data[0].embedding;
+
+    const results = await semanticSearch({
+      organizationId,
+      queryEmbedding,
+      limit: limit || 5,
+      activeOnly: activeOnly !== undefined ? activeOnly : true,
+      minClearanceLevel: minClearanceLevel || 4
+    });
+
+    return {
+      status: "success",
+      data: results
     };
   } catch (error: any) {
     return new Response(JSON.stringify({ error: error.message }), { status: 500 });

@@ -12,7 +12,7 @@
     "bullmq": "^5.79.2",
     "elysia": "^1.4.29",
     "groq-sdk": "^1.3.0",
-    "openai": "^4.0.0",
+    "openai": "^6.45.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {

@@ -68,6 +68,20 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
+        name: "get_code_dependencies",
+        description: "ค้นหาความสัมพันธ์และผลกระทบของโค้ด (AST Graph) เช่น ถ้ารื้อฟังก์ชันนี้จะกระทบส่วนไหนบ้าง",
+        inputSchema: {
+          type: "object",
+          properties: {
+            organizationId: { type: "string", description: "รหัสองค์กร เช่น org_001" },
+            entityId: { type: "string", description: "รหัสของ Function, Module หรือ Class ที่ต้องการค้นหา" },
+            direction: { type: "string", description: "ทิศทาง (outgoing, incoming, both)", enum: ["outgoing", "incoming", "both"] },
+            maxDepth: { type: "number", description: "ระดับความลึกในการไต่กราฟ (ค่าเริ่มต้น 3)" }
+          },
+          required: ["organizationId", "entityId"]
+        }
+      },
+      {
         name: "memorize_fact",
         description: "ฝังความจำสั้นๆ หรือข้อเท็จจริงใหม่ลงใน Knowledge Graph",
         inputSchema: {
@@ -82,13 +96,27 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
+        name: "semantic_search",
+        description: "ค้นหาข้อมูล บริบท หรือข้อเท็จจริงในอดีตจากฐานข้อมูล Vector โดยใช้ความหมายที่ใกล้เคียงกับคำถาม",
+        inputSchema: {
+          type: "object",
+          properties: {
+            organizationId: { type: "string", description: "รหัสองค์กร เช่น org_001" },
+            query: { type: "string", description: "คำถามหรือคีย์เวิร์ดที่ต้องการค้นหา" },
+            limit: { type: "number", description: "จำนวนผลลัพธ์ที่ต้องการ (ค่าเริ่มต้น 5)" }
+          },
+          required: ["organizationId", "query"]
+        }
+      },
+      {
         name: "log_episode",
         description: "บันทึกเหตุการณ์ ประวัติการแชท หรือ Episode ลงในระบบความจำ",
         inputSchema: {
           type: "object",
           properties: {
             summary: { type: "string", description: "สรุปเหตุการณ์" },
-            source: { type: "string", description: "แหล่งที่มาของเหตุการณ์ (เช่น chat)" }
+            source: { type: "string", description: "แหล่งที่มาของเหตุการณ์ (เช่น chat)" },
+            organizationId: { type: "string", description: "รหัสองค์กร เช่น org_001" }
           },
           required: ["summary"]
         }
@@ -167,7 +195,37 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           summary: args?.summary,
-          source: args?.source || "chat"
+          source: args?.source || "chat",
+          organizationId: args?.organizationId
+        })
+      });
+      const data = await response.json();
+      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    }
+
+    else if (name === "get_code_dependencies") {
+      const response = await fetch(`${API_BASE_URL}/dependencies`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          organizationId: args?.organizationId,
+          entityId: args?.entityId,
+          direction: args?.direction,
+          maxDepth: args?.maxDepth
+        })
+      });
+      const data = await response.json();
+      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    }
+    
+    else if (name === "semantic_search") {
+      const response = await fetch(`${API_BASE_URL}/semantic_search`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          organizationId: args?.organizationId,
+          query: args?.query,
+          limit: args?.limit
         })
       });
       const data = await response.json();
