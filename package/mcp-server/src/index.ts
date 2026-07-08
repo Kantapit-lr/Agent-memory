@@ -15,7 +15,6 @@ import { getDocumentTree } from "../../adapter/src/repositories/queries/getDocum
 import { discoverEntities } from "../../adapter/src/repositories/queries/discoverEntities";
 import { getEntityTimeline } from "../../adapter/src/repositories/queries/getEntityTimeline";
 import { justifyIntent } from "./tools/justifyIntent";
-import { discoverNodes } from "./tools/discoverNodes";
 import { memorizeFact } from "./tools/memorizeFact";
 import { logEpisode } from "./tools/logEpisode";
 import { getCodeDependencies } from "../../adapter/src/repositories/queries/getCodeDependencies";
@@ -503,48 +502,6 @@ app.get("/api/memory/document/:documentId/tree", async ({ params, query }) => {
   } catch (error: any) { return new Response(JSON.stringify({ error: error.message }), { status: 500 }); }
 });
 
-app.get("/api/memory/entity/:entityName/timeline", async ({ params, query }) => {
-  try {
-    const orgId = query.orgId as string || "org_001";
-    const decodedEntityName = decodeURIComponent(params.entityName);
-    const discoverResults = await discoverEntities({
-      organizationId: orgId,
-      keyword: decodedEntityName
-    });
-
-    if (!discoverResults || discoverResults.length === 0) {
-      return {
-        status: "success",
-        search_keyword: decodedEntityName,
-        timeline: []
-      };
-    }
-
-    const timeline = await getEntityTimeline({
-      organizationId: orgId,
-      entityId: discoverResults[0].id
-    });
-
-    return {
-      status: "success",
-      search_keyword: decodedEntityName,
-      timeline: timeline
-    };
-  } catch (error: any) {
-    return new Response(JSON.stringify({ error: error.message }), { status: 500 });
-  }
-});
-
-app.get("/api/memory/discover", async ({ query }) => {
-  try {
-    const keyword = query.keyword as string;
-    const orgId = query.orgId as string || "org_pdf_default";
-    if (!keyword || keyword.trim() === "") return new Response(JSON.stringify({ error: "Missing keyword parameter" }), { status: 400 });
-    const results = await discoverEntities({ organizationId: orgId, keyword: keyword });
-    return { status: "success", search_keyword: keyword, total_found: results.length, results: results };
-  } catch (error: any) { return new Response(JSON.stringify({ error: error.message }), { status: 500 }); }
-});
-
 app.get("/api/memory/documents", async ({ query }) => {
   const session = driver.session();
   try {
@@ -590,19 +547,32 @@ app.post("/api/memory/intent", async ({ body }) => {
 
 app.post("/api/memory/discover", async ({ body }) => {
   try {
-    const { keyword } = body as any;
-
+    const { keyword, organizationId } = body as any;
     if (!keyword) {
-      return new Response(JSON.stringify({ error: "Missing keyword field" }), { status: 400 });
+      return new Response(JSON.stringify({ error: "Missing keyword" }), { status: 400 });
     }
+    const results = await discoverEntities({
+      organizationId: organizationId || "org_001",
+      keyword: keyword
+    });
+    return { status: "success", data: results };
+  } catch (error: any) {
+    return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+  }
+});
 
-    const nodes = await discoverNodes(keyword);
-
-    return {
-      status: "success",
-      results: nodes,
-      message: nodes.length > 0 ? "Entities found. Please select the correct ID." : "No matching entities found."
-    };
+app.post("/api/memory/timeline", async ({ body }) => {
+  try {
+    const { entityId, organizationId, relationshipType } = body as any;
+    if (!entityId) {
+      return new Response(JSON.stringify({ error: "Missing entityId" }), { status: 400 });
+    }
+    const timeline = await getEntityTimeline({
+      organizationId: organizationId || "org_001",
+      entityId: entityId,
+      relationshipType: relationshipType
+    });
+    return { status: "success", data: timeline };
   } catch (error: any) {
     return new Response(JSON.stringify({ error: error.message }), { status: 500 });
   }
@@ -620,7 +590,7 @@ app.post("/api/memory/memorize", async ({ body }) => {
 
     const result = await memorizeFact({
       ...payload,
-      organizationId: payload.organizationId || "org_001" // บังคับใส่ค่าเริ่มต้นถ้าไม่มี
+      organizationId: payload.organizationId || "org_001"
     });
 
     return {

@@ -16,11 +16,9 @@ const server = new Server(
   }
 );
 
-// 1. ประกาศรายชื่อเครื่องมือทั้งหมด (ของเดิม + ของใหม่)
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
-      // --- เครื่องมือเดิมที่มีอยู่แล้ว ---
       {
         name: "query_memory",
         description: "ค้นหาข้อมูลเชิงลึกและข้อเท็จจริงจากฐานข้อมูลสมองกล (Graph+Vector) เพื่อตอบคำถาม",
@@ -34,17 +32,18 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
-        name: "get_timeline",
-        description: "ดึงข้อมูลประวัติและไทม์ไลน์เหตุการณ์ทั้งหมดที่เกี่ยวข้องกับ Entity นั้นๆ",
+        name: "get_entity_timeline",
+        description: "ดึงข้อมูลประวัติและไทม์ไลน์เหตุการณ์ทั้งหมดที่เกี่ยวข้องกับ Entity นั้นๆ จัดเรียงตามเวลา",
         inputSchema: {
           type: "object",
           properties: {
-            entityName: { type: "string", description: "ชื่อ Entity ที่ต้องการดูประวัติ (ควรค้นหาจาก discover_nodes ก่อน)" }
+            entityId: { type: "string", description: "รหัส ID ของ Entity (ต้องค้นหาจาก discover_nodes ก่อน)" },
+            organizationId: { type: "string", description: "รหัสองค์กร (ถ้ามี)" },
+            relationshipType: { type: "string", description: "ประเภทความสัมพันธ์ที่ต้องการกรอง (ถ้ามี)" }
           },
-          required: ["entityName"]
+          required: ["entityId"]
         }
       },
-      // --- เครื่องมือใหม่ 4 ตัวตาม Spec ---
       {
         name: "justify_intent",
         description: "วิเคราะห์คำถามของผู้ใช้เพื่อตัดสินใจว่า Agent ควรเรียกใช้ Tool อ่านข้อมูลตัวไหน",
@@ -62,7 +61,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         inputSchema: {
           type: "object",
           properties: {
-            keyword: { type: "string", description: "คำค้นหาสั้นๆ" }
+            keyword: { type: "string", description: "คำค้นหาสั้นๆ" },
+            organizationId: { type: "string", description: "รหัสองค์กร (ถ้ามี)" }
           },
           required: ["keyword"]
         }
@@ -90,7 +90,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             subject: { type: "string" },
             predicate: { type: "string" },
             object: { type: "string" },
-            context: { type: "string" }
+            context: { type: "string" },
+            organizationId: { type: "string" }
           },
           required: ["subject", "predicate", "object", "context"]
         }
@@ -132,6 +133,21 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           },
           required: ["summary"]
         }
+      },
+      {
+        name: "ingest_document",
+        description: "อัปโหลดและนำเข้าเอกสาร/ไฟล์เข้าสู่ระบบเพื่อสกัดเป็น Knowledge Graph (ทำงานแบบ Async Background)",
+        inputSchema: {
+          type: "object",
+          properties: {
+            organizationId: { type: "string" },
+            documentId: { type: "string", description: "ตั้งรหัสให้เอกสาร เช่น doc_002" },
+            title: { type: "string", description: "ชื่อเอกสาร" },
+            type: { type: "string", description: "ประเภทไฟล์ (เช่น PDF, CODE, DOCX)" },
+            file_url: { type: "string", description: "Path หรือ URL ของไฟล์ (ถ้ามี)" }
+          },
+          required: ["documentId", "title"]
+        }
       }
     ]
   };
@@ -156,8 +172,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
     }
 
-    else if (name === "get_timeline") {
-      const response = await fetch(`${API_BASE_URL}/entity/${encodeURIComponent(String(args?.entityName))}/timeline`);
+    else if (name === "get_entity_timeline") {
+      const response = await fetch(`${API_BASE_URL}/timeline`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          entityId: args?.entityId,
+          organizationId: args?.organizationId,
+          relationshipType: args?.relationshipType
+        })
+      });
       const data = await response.json();
       return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
     }
@@ -176,7 +200,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const response = await fetch(`${API_BASE_URL}/discover`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ keyword: args?.keyword })
+        body: JSON.stringify({ 
+          keyword: args?.keyword,
+          organizationId: args?.organizationId
+        })
       });
       const data = await response.json();
       return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
@@ -190,7 +217,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           subject: args?.subject,
           predicate: args?.predicate,
           object: args?.object,
-          context: args?.context
+          context: args?.context,
+          organizationId: args?.organizationId
         })
       });
       const data = await response.json();
@@ -249,6 +277,22 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       const response = await fetch(url);
+      const data = await response.json();
+      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    }
+
+    else if (name === "ingest_document") {
+      const response = await fetch(`${API_BASE_URL}/ingest`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          organizationId: args?.organizationId,
+          documentId: args?.documentId,
+          title: args?.title,
+          type: args?.type,
+          file_url: args?.file_url
+        })
+      });
       const data = await response.json();
       return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
     }
