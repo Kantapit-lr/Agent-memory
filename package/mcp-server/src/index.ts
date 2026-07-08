@@ -14,6 +14,10 @@ import { saveEpisode } from "../../adapter/src/repositories/nodes/saveEpisode";
 import { getDocumentTree } from "../../adapter/src/repositories/queries/getDocumentTree";
 import { discoverEntities } from "../../adapter/src/repositories/queries/discoverEntities";
 import { getEntityTimeline } from "../../adapter/src/repositories/queries/getEntityTimeline";
+import { justifyIntent } from "./tools/justifyIntent";
+import { discoverNodes } from "./tools/discoverNodes";
+import { memorizeFact } from "./tools/memorizeFact";
+import { logEpisode } from "./tools/logEpisode";
 
 const isMock = process.env.USE_MOCK_AI === "true";
 
@@ -563,6 +567,85 @@ app.delete("/api/memory/document/:documentId", async ({ params }) => {
     return { status: "success" };
   } catch (error: any) { return new Response(JSON.stringify({ error: error.message }), { status: 500 }); }
   finally { await session.close(); }
+});
+
+app.post("/api/memory/intent", async ({ body }) => {
+  try {
+    const { query } = body as any;
+    if (!query) {
+      return new Response(JSON.stringify({ error: "Missing query field" }), { status: 400 });
+    }
+
+    const intentResult = await justifyIntent(query);
+    return {
+      status: "success",
+      intent: intentResult
+    };
+  } catch (error: any) {
+    return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+  }
+});
+
+app.post("/api/memory/discover", async ({ body }) => {
+  try {
+    const { keyword } = body as any;
+    
+    if (!keyword) {
+      return new Response(JSON.stringify({ error: "Missing keyword field" }), { status: 400 });
+    }
+
+    const nodes = await discoverNodes(keyword);
+    
+    return {
+      status: "success",
+      results: nodes,
+      message: nodes.length > 0 ? "Entities found. Please select the correct ID." : "No matching entities found."
+    };
+  } catch (error: any) {
+    return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+  }
+});
+
+app.post("/api/memory/memorize", async ({ body }) => {
+  try {
+    const payload = body as any;
+    
+    if (!payload.subject || !payload.predicate || !payload.object || !payload.context) {
+      return new Response(JSON.stringify({ 
+        error: "Missing required fields. Please provide subject, predicate, object, and context." 
+      }), { status: 400 });
+    }
+
+    const result = await memorizeFact(payload);
+    
+    return {
+      status: "success",
+      ...result
+    };
+  } catch (error: any) {
+    return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+  }
+});
+
+app.post("/api/memory/episode", async ({ body }) => {
+  try {
+    const payload = body as any;
+    
+    if (!payload.summary) {
+      return new Response(JSON.stringify({ 
+        error: "Missing required field: summary" 
+      }), { status: 400 });
+    }
+
+    const result = await logEpisode(payload);
+    
+    return {
+      status: "success",
+      ...result
+    };
+  } catch (error: any) {
+    return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+  }
 });
 
 app.listen(3000, () => {

@@ -16,9 +16,11 @@ const server = new Server(
   }
 );
 
+// 1. ประกาศรายชื่อเครื่องมือทั้งหมด (ของเดิม + ของใหม่)
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
+      // --- เครื่องมือเดิมที่มีอยู่แล้ว ---
       {
         name: "query_memory",
         description: "ค้นหาข้อมูลเชิงลึกและข้อเท็จจริงจากฐานข้อมูลสมองกล (Graph+Vector) เพื่อตอบคำถาม",
@@ -32,36 +34,75 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
-        name: "discover_entity",
-        description: "ค้นหารายชื่อบริษัท, บุคคล, หรือ Entity ที่มีอยู่ในระบบจาก Keyword สั้นๆ เพื่อดึง ID ที่ถูกต้อง",
-        inputSchema: {
-          type: "object",
-          properties: {
-            keyword: { type: "string", description: "คำค้นหาสั้นๆ (เช่น โฟร์ยูทู)" },
-            orgId: { type: "string", description: "รหัสองค์กร (ใส่หรือไม่ใส่ก็ได้)" }
-          },
-          required: ["keyword"]
-        }
-      },
-      {
         name: "get_timeline",
         description: "ดึงข้อมูลประวัติและไทม์ไลน์เหตุการณ์ทั้งหมดที่เกี่ยวข้องกับ Entity นั้นๆ",
         inputSchema: {
           type: "object",
           properties: {
-            entityName: { type: "string", description: "ชื่อ Entity ที่ต้องการดูประวัติ (ควรค้นหาจาก discover_entity ก่อน)" }
+            entityName: { type: "string", description: "ชื่อ Entity ที่ต้องการดูประวัติ (ควรค้นหาจาก discover_nodes ก่อน)" }
           },
           required: ["entityName"]
+        }
+      },
+      // --- เครื่องมือใหม่ 4 ตัวตาม Spec ---
+      {
+        name: "justify_intent",
+        description: "วิเคราะห์คำถามของผู้ใช้เพื่อตัดสินใจว่า Agent ควรเรียกใช้ Tool อ่านข้อมูลตัวไหน",
+        inputSchema: {
+          type: "object",
+          properties: {
+            query: { type: "string", description: "คำถามสดๆ จากผู้ใช้" }
+          },
+          required: ["query"]
+        }
+      },
+      {
+        name: "discover_nodes",
+        description: "ค้นหารายชื่อ Entity จาก Keyword สั้นๆ เพื่อดึง ID ที่ถูกต้องก่อนนำไปค้นหาต่อ",
+        inputSchema: {
+          type: "object",
+          properties: {
+            keyword: { type: "string", description: "คำค้นหาสั้นๆ" }
+          },
+          required: ["keyword"]
+        }
+      },
+      {
+        name: "memorize_fact",
+        description: "ฝังความจำสั้นๆ หรือข้อเท็จจริงใหม่ลงใน Knowledge Graph",
+        inputSchema: {
+          type: "object",
+          properties: {
+            subject: { type: "string" },
+            predicate: { type: "string" },
+            object: { type: "string" },
+            context: { type: "string" }
+          },
+          required: ["subject", "predicate", "object", "context"]
+        }
+      },
+      {
+        name: "log_episode",
+        description: "บันทึกเหตุการณ์ ประวัติการแชท หรือ Episode ลงในระบบความจำ",
+        inputSchema: {
+          type: "object",
+          properties: {
+            summary: { type: "string", description: "สรุปเหตุการณ์" },
+            source: { type: "string", description: "แหล่งที่มาของเหตุการณ์ (เช่น chat)" }
+          },
+          required: ["summary"]
         }
       }
     ]
   };
 });
 
+// 2. จัดการเมื่อ Agent สั่งเรียกใช้เครื่องมือ
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
   try {
+    // --- ของเดิม ---
     if (name === "query_memory") {
       const response = await fetch(`${API_BASE_URL}/query`, {
         method: "POST",
@@ -75,20 +116,60 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       });
       const data = await response.json();
       return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
-    } 
-    
-    else if (name === "discover_entity") {
-      const url = new URL(`${API_BASE_URL}/discover`);
-      url.searchParams.append("keyword", String(args?.keyword));
-      if (args?.orgId) url.searchParams.append("orgId", String(args?.orgId));
-      
-      const response = await fetch(url.toString());
-      const data = await response.json();
-      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
     }
 
     else if (name === "get_timeline") {
       const response = await fetch(`${API_BASE_URL}/entity/${encodeURIComponent(String(args?.entityName))}/timeline`);
+      const data = await response.json();
+      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    }
+
+    // --- ของใหม่ ---
+    else if (name === "justify_intent") {
+      const response = await fetch(`${API_BASE_URL}/intent`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: args?.query })
+      });
+      const data = await response.json();
+      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    }
+
+    else if (name === "discover_nodes") {
+      // ใช้ POST ตาม API ที่เราเพิ่งสร้างใหม่ไป
+      const response = await fetch(`${API_BASE_URL}/discover`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keyword: args?.keyword })
+      });
+      const data = await response.json();
+      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    }
+
+    else if (name === "memorize_fact") {
+      const response = await fetch(`${API_BASE_URL}/memorize`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subject: args?.subject,
+          predicate: args?.predicate,
+          object: args?.object,
+          context: args?.context
+        })
+      });
+      const data = await response.json();
+      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    }
+
+    else if (name === "log_episode") {
+      const response = await fetch(`${API_BASE_URL}/episode`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          summary: args?.summary,
+          source: args?.source || "chat"
+        })
+      });
       const data = await response.json();
       return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
     }
