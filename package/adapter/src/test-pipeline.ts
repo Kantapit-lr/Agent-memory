@@ -15,6 +15,7 @@ import { deleteEpisode } from "@/src/repositories/nodes/deleteEpisode"
 import { deleteEntity } from "@/src/repositories/nodes/deleteEntity"
 import { deleteOrganization } from "@/src/repositories/nodes/deleteOrganization"
 import { semanticSearch } from "@/src/repositories/queries/semanticSearch"
+import { findSimilarEntity } from "@/src/repositories/nodes/findSimilarEntity"
 import { getCodeDependencies } from "@/src/repositories/queries/getCodeDependencies"
 import driver from "@/src/db"
 
@@ -36,8 +37,8 @@ async function main() {
     console.log(`   ⏱️  [Step 1] saveOrganization สำเร็จใน ${(performance.now() - t1).toFixed(2)} ms`)
 
     const t2 = performance.now()
-    await saveEntity({ organizationId: orgId, id: "person_02", name: "กานต์ธนภัทร", description: "Data Analyst", type: "PERSON" })
-    await saveEntity({ organizationId: orgId, id: "org_02_business", name: "บริษัทนวัตกรรม B", description: "ผู้พัฒนา AI สถาปัตยกรรมกราฟ", type: "ORGANIZATION" })
+    await saveEntity({ organizationId: orgId, id: "person_02", name: "กานต์ธนภัทร", description: "Data Analyst", type: "PERSON", embedding: new Array(1024).fill(0.1) })
+    await saveEntity({ organizationId: orgId, id: "org_02_business", name: "บริษัทนวัตกรรม B", description: "ผู้พัฒนา AI สถาปัตยกรรมกราฟ", type: "ORGANIZATION", embedding: new Array(1024).fill(0.9) })
     console.log(`   ⏱️  [Step 2] saveEntity x2 สำเร็จใน ${(performance.now() - t2).toFixed(2)} ms`)
 
     const t3 = performance.now()
@@ -141,6 +142,25 @@ async function main() {
     console.log(`\n🎉 ทดสอบสำเร็จสมบูรณ์ (รวม: ${(performance.now() - pipelineStart).toFixed(2)} ms)`)
 
     // ─────────────────────────────────────────
+    // ENTITY RESOLUTION PIPELINE
+    // ─────────────────────────────────────────
+    console.log("\n🧩 เริ่มต้นทดสอบ Entity Resolution Pipeline...")
+
+    // ทดสอบว่า "กรุงเทพมหานคร" (vector ใกล้กับ person_02) จะถูก merge เข้ากับ person_02 ไหม
+    // ใช้ vector เดียวกัน (0.1) เพื่อจำลองว่าเป็นสิ่งเดียวกัน
+    const tResolution = performance.now()
+    const similar = await findSimilarEntity({ organizationId: orgId, embedding: new Array(1024).fill(0.1), type: "PERSON" })
+    console.log(`\n   🧩 [findSimilarEntity] vector เหมือน person_02 (type=PERSON) → ${similar ? `พบ: ${similar.name} (score: ${similar.similarityScore.toFixed(4)})` : "ไม่พบ"}`)
+    console.log(`   ⏱️  ${(performance.now() - tResolution).toFixed(2)} ms`)
+
+    // ทดสอบ saveEntity ที่มี embedding ใกล้เคียงกับ person_02 → ควร merge ไม่สร้างใหม่
+    const tMerge = performance.now()
+    await saveEntity({ organizationId: orgId, id: "person_02_duplicate", name: "กานต์ ธนภัทร", description: "Data Analyst (ซ้ำ)", type: "PERSON", embedding: new Array(1024).fill(0.1) })
+    const afterMerge = await findSimilarEntity({ organizationId: orgId, embedding: new Array(1024).fill(0.1) })
+    console.log(`\n   🧩 [saveEntity duplicate] ผลหลัง merge → id: ${afterMerge?.id ?? "null"} (ควรเป็น person_02 ไม่ใช่ person_02_duplicate)`)
+    console.log(`   ⏱️  ${(performance.now() - tMerge).toFixed(2)} ms`)
+
+    // ─────────────────────────────────────────
     // SEMANTIC SEARCH PIPELINE
     // ─────────────────────────────────────────
     console.log("\n🔍 เริ่มต้นทดสอบ Semantic Search Pipeline...")
@@ -182,38 +202,38 @@ async function main() {
     // ─────────────────────────────────────────
     // DELETE PIPELINE
     // ─────────────────────────────────────────
-    // console.log("\n🗑️  เริ่มต้นทดสอบ Delete Pipeline...")
+    console.log("\n🗑️  เริ่มต้นทดสอบ Delete Pipeline...")
 
-    // const tDelChunk = performance.now()
-    // const delChunkResult = await deleteChunk({ organizationId: orgId, chunkId: "chunk_v2_time_01" })
-    // console.log(`\n   🗑️  [deleteChunk] chunk_v2_time_01 → ${JSON.stringify(delChunkResult)}`)
-    // console.log(`   ⏱️  ${(performance.now() - tDelChunk).toFixed(2)} ms`)
+    const tDelChunk = performance.now()
+    const delChunkResult = await deleteChunk({ organizationId: orgId, chunkId: "chunk_v2_time_01" })
+    console.log(`\n   🗑️  [deleteChunk] chunk_v2_time_01 → ${JSON.stringify(delChunkResult)}`)
+    console.log(`   ⏱️  ${(performance.now() - tDelChunk).toFixed(2)} ms`)
 
-    // // ลบ Episode ที่เพิ่งหลุด Chunk ไปแล้ว ไม่ต้อง force
-    // const tDelEpisode = performance.now()
-    // const delEpisodeResult = await deleteEpisode({ organizationId: orgId, episodeId })
-    // console.log(`\n   🗑️  [deleteEpisode] ${episodeId} (ไม่มี Chunk เหลือ) → ${JSON.stringify(delEpisodeResult)}`)
-    // console.log(`   ⏱️  ${(performance.now() - tDelEpisode).toFixed(2)} ms`)
+    // ลบ Episode ที่เพิ่งหลุด Chunk ไปแล้ว ไม่ต้อง force
+    const tDelEpisode = performance.now()
+    const delEpisodeResult = await deleteEpisode({ organizationId: orgId, episodeId })
+    console.log(`\n   🗑️  [deleteEpisode] ${episodeId} (ไม่มี Chunk เหลือ) → ${JSON.stringify(delEpisodeResult)}`)
+    console.log(`   ⏱️  ${(performance.now() - tDelEpisode).toFixed(2)} ms`)
 
-    // // ลบ Document ที่ยังมี Chunk เหลืออยู่ 3 ก้อน → ต้อง force: true
-    // const tDelDocument = performance.now()
-    // const delDocumentResult = await deleteDocument({ organizationId: orgId, documentId: docId, force: true })
-    // console.log(`\n   🗑️  [deleteDocument] ${docId} (force cascade) → ${JSON.stringify(delDocumentResult)}`)
-    // console.log(`   ⏱️  ${(performance.now() - tDelDocument).toFixed(2)} ms`)
+    // ลบ Document ที่ยังมี Chunk เหลืออยู่ 3 ก้อน → ต้อง force: true
+    const tDelDocument = performance.now()
+    const delDocumentResult = await deleteDocument({ organizationId: orgId, documentId: docId, force: true })
+    console.log(`\n   🗑️  [deleteDocument] ${docId} (force cascade) → ${JSON.stringify(delDocumentResult)}`)
+    console.log(`   ⏱️  ${(performance.now() - tDelDocument).toFixed(2)} ms`)
 
-    // // person_02 ยังมีความสัมพันธ์ active กับ org_02_business → ต้อง force: true
-    // const tDelEntity = performance.now()
-    // const delEntityResult = await deleteEntity({ organizationId: orgId, entityId: "person_02", force: true })
-    // console.log(`\n   🗑️  [deleteEntity] person_02 (force) → ${JSON.stringify(delEntityResult)}`)
-    // console.log(`   ⏱️  ${(performance.now() - tDelEntity).toFixed(2)} ms`)
+    // person_02 ยังมีความสัมพันธ์ active กับ org_02_business → ต้อง force: true
+    const tDelEntity = performance.now()
+    const delEntityResult = await deleteEntity({ organizationId: orgId, entityId: "person_02", force: true })
+    console.log(`\n   🗑️  [deleteEntity] person_02 (force) → ${JSON.stringify(delEntityResult)}`)
+    console.log(`   ⏱️  ${(performance.now() - tDelEntity).toFixed(2)} ms`)
 
-    // // ปิดท้าย: ลบทั้งองค์กรแบบ force (org_02_business ยังเหลืออยู่)
-    // const tDelOrg = performance.now()
-    // const delOrgResult = await deleteOrganization({ organizationId: orgId, force: true })
-    // console.log(`\n   🗑️  [deleteOrganization] ${orgId} (force) → ${JSON.stringify(delOrgResult)}`)
-    // console.log(`   ⏱️  ${(performance.now() - tDelOrg).toFixed(2)} ms`)
+    // ปิดท้าย: ลบทั้งองค์กรแบบ force (org_02_business ยังเหลืออยู่)
+    const tDelOrg = performance.now()
+    const delOrgResult = await deleteOrganization({ organizationId: orgId, force: true })
+    console.log(`\n   🗑️  [deleteOrganization] ${orgId} (force) → ${JSON.stringify(delOrgResult)}`)
+    console.log(`   ⏱️  ${(performance.now() - tDelOrg).toFixed(2)} ms`)
 
-    // console.log(`\n🎉 Delete Pipeline สำเร็จสมบูรณ์ (รวมทั้งหมด: ${(performance.now() - pipelineStart).toFixed(2)} ms)`)
+    console.log(`\n🎉 Delete Pipeline สำเร็จสมบูรณ์ (รวมทั้งหมด: ${(performance.now() - pipelineStart).toFixed(2)} ms)`)
 
   } catch (error) {
     console.error("❌ เกิดข้อผิดพลาด:", error)

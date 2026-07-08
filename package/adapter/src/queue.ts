@@ -36,6 +36,7 @@ export interface IngestionJobData {
     name: string
     type: string
     description: string
+    embedding?: number[]  // optional เพราะ code entity ไม่ต้องการ
   }>
   relationships: Array<{
     source_id: string
