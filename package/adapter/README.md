@@ -486,6 +486,36 @@ const result = await getCodeDependencies({
 
 ---
 
+## 🧩 Entity Resolution
+
+ระบบจะทำ Entity Resolution อัตโนมัติทุกครั้งที่เรียก `saveEntity` ที่มี `embedding` ส่งมาด้วย
+
+**หลักการ:**
+1. แปลง entity ใหม่เป็น vector ก่อน (ทำโดยฝั่งที่เรียก เช่น cognitive-extractor)
+2. ค้นหาใน Neo4j ว่ามี Entity ที่ vector ใกล้เคียงกัน (threshold 0.92) อยู่แล้วไหม
+3. ถ้าเจอ → merge เข้ากับตัวเดิม ไม่สร้าง node ใหม่
+4. ถ้าไม่เจอ → สร้าง node ใหม่ตามปกติ
+
+**ตัวอย่าง:** "กทม." และ "Bangkok" จะกลายเป็น Entity node เดียวกัน
+
+```typescript
+// ส่ง embedding มาด้วยเพื่อให้ Entity Resolution ทำงาน
+await saveEntity({
+  organizationId: "org_001",
+  id: "entity_01",
+  name: "กทม.",
+  type: "LOCATION",
+  description: "กรุงเทพมหานคร",
+  embedding: [...] // Vector 1024 มิติจาก Cohere
+})
+```
+
+**หมายเหตุ:**
+- Code entity (`FUNCTION`, `MODULE`, `CLASS`) ไม่ต้องส่ง `embedding` ระบบจะข้าม Entity Resolution ให้อัตโนมัติ
+- **ต้องรัน `setup-indexes.ts`** เพื่อสร้าง `entity_embedding` vector index ก่อนใช้งาน
+
+---
+
 ## 🗑 Delete API
 
 ฟังก์ชันลบ ทุกตัวรับ object เดียว มี `force` (optional, default = false) ควบคุมว่าจะ cascade delete หรือไม่

@@ -24,6 +24,7 @@ const worker = new Worker<IngestionJobData>(
         name: entity.name,
         type: entity.type,
         description: entity.description,
+        embedding: entity.embedding,  // ส่ง embedding มาด้วยเพื่อให้ Entity Resolution ทำงานได้
       })
     }
     console.log(`   ✅ saveEntity x${entities.length}`)

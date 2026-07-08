@@ -21,13 +21,21 @@ async function setupIndexes() {
       { name: "chunk_source_seq",    label: "Chunk",        props: "(n.organizationId, n.source_id, n.source_type, n.sequence_order)" },
     ]
 
-    // Vector Index สำหรับ semanticSearch (ต้องสร้างแยกเพราะ syntax ต่างจาก regular index)
+    // Vector Index สำหรับ semanticSearch
     await session.run(`
       CREATE VECTOR INDEX chunk_embedding IF NOT EXISTS
       FOR (c:Chunk) ON c.embedding
       OPTIONS { indexConfig: { \`vector.dimensions\`: 1024, \`vector.similarity_function\`: 'cosine' } }
     `)
     console.log("   ✅ chunk_embedding (Vector Index)")
+
+    // Vector Index สำหรับ Entity Resolution ใน saveEntity
+    await session.run(`
+      CREATE VECTOR INDEX entity_embedding IF NOT EXISTS
+      FOR (e:Entity) ON e.embedding
+      OPTIONS { indexConfig: { \`vector.dimensions\`: 1024, \`vector.similarity_function\`: 'cosine' } }
+    `)
+    console.log("   ✅ entity_embedding (Vector Index)")
 
     for (const idx of indexes) {
       await session.run(
