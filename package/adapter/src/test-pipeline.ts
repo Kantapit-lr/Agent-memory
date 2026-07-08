@@ -17,6 +17,7 @@ import { deleteOrganization } from "@/src/repositories/nodes/deleteOrganization"
 import { semanticSearch } from "@/src/repositories/queries/semanticSearch"
 import { findSimilarEntity } from "@/src/repositories/nodes/findSimilarEntity"
 import { getExpiredFacts, purgeExpiredFacts } from "@/src/repositories/queries/expiredFacts"
+import { getDocuments } from "@/src/repositories/queries/getDocuments"
 import { getCodeDependencies } from "@/src/repositories/queries/getCodeDependencies"
 import driver from "@/src/db"
 
@@ -160,6 +161,23 @@ async function main() {
     const afterMerge = await findSimilarEntity({ organizationId: orgId, embedding: new Array(1024).fill(0.1) })
     console.log(`\n   🧩 [saveEntity duplicate] ผลหลัง merge → id: ${afterMerge?.id ?? "null"} (ควรเป็น person_02 ไม่ใช่ person_02_duplicate)`)
     console.log(`   ⏱️  ${(performance.now() - tMerge).toFixed(2)} ms`)
+
+    // ─────────────────────────────────────────
+    // GET DOCUMENTS PIPELINE
+    // ─────────────────────────────────────────
+    console.log("\n📋 เริ่มต้นทดสอบ Get Documents Pipeline...")
+
+    const tDocs = performance.now()
+    const docs = await getDocuments({ organizationId: orgId })
+    console.log(`\n   📋 [getDocuments] พบ ${docs.length} document`)
+    docs.forEach((d) => console.log(`      - [${d.id}] "${d.title}" (${d.type}/${d.language}) | ${d.chunkCount} chunks`))
+    console.log(`   ⏱️  ${(performance.now() - tDocs).toFixed(2)} ms`)
+
+    // ทดสอบ filter ตาม language
+    const tDocsFilter = performance.now()
+    const docsTH = await getDocuments({ organizationId: orgId, language: "TH" })
+    console.log(`\n   📋 [getDocuments + filter] language=TH → พบ ${docsTH.length} document`)
+    console.log(`   ⏱️  ${(performance.now() - tDocsFilter).toFixed(2)} ms`)
 
     // ─────────────────────────────────────────
     // EXPIRED FACTS PIPELINE

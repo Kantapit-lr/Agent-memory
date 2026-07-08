@@ -413,7 +413,23 @@ const filtered = await getEntityTimeline({
 
 ---
 
-### 6. `semanticSearch`
+### 6. `getDocuments`
+
+ดึงรายชื่อ Document ทั้งหมดใน org พร้อม `chunkCount` ใช้ก่อนเรียก `getDocumentTree` เพื่อให้ Agent รู้ว่ามีเอกสารอะไรบ้าง
+
+```typescript
+import { getDocuments } from "@memory-layer/storage-adapter/queries/getDocuments"
+
+const docs = await getDocuments({
+  organizationId: "org_001",
+  language: "TH",  // optional
+  type: "PDF"      // optional
+})
+```
+
+---
+
+### 7. `semanticSearch`
 
 ค้นหา Chunk ที่ใกล้เคียงกับ query มากที่สุด โดยใช้ Vector Similarity (Cosine) พร้อม filter activeOnly, clearanceLevel, langFilter
 
@@ -570,6 +586,8 @@ await deleteChunk({
 **⚠️ หมายเหตุสำคัญ:** ฟังก์ชันนี้ไม่ซ่อม `NEXT_CHUNK` ของก้อนข้างเคียงให้อัตโนมัติ
 ถ้าลบ chunk ตรงกลาง (เช่น chunk_02 จากสาย chunk_01→chunk_02→chunk_03) ลำดับจะขาดตอน
 ต้องจัดการ re-link เองถ้าต้องการ
+
+> **Technical Debt:** ถ้าในอนาคตมีการลบ Chunk ตรงกลาง เนื้อหาเอกสารตอน Agent เรียก `get_document_tree` อาจแหว่งได้ ควรพิจารณาเพิ่ม auto-relink `NEXT_CHUNK` ในภายหลัง
 
 **⚠️ Error ที่อาจเกิดขึ้น:** `OrganizationNotFoundError`, `ChunkNotFoundError`
 
