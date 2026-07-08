@@ -486,6 +486,37 @@ const result = await getCodeDependencies({
 
 ---
 
+## ⏰ Expired Facts
+
+ระบบจัดการ relationship ที่มี `expires_at` หมดอายุแล้ว มี 2 ฟังก์ชัน:
+
+### `getExpiredFacts`
+ดึง relationship ที่หมดอายุแล้วทั้งหมด ใช้สำหรับ monitoring ก่อน purge
+
+```typescript
+import { getExpiredFacts } from "@memory-layer/storage-adapter/queries/expiredFacts"
+
+const expired = await getExpiredFacts({
+  organizationId: "org_001",
+  asOf: "2026-01-01T00:00:00Z"  // optional default = ปัจจุบัน
+})
+```
+
+### `purgeExpiredFacts`
+ปิดหรือลบ relationship ที่หมดอายุ
+
+```typescript
+import { purgeExpiredFacts } from "@memory-layer/storage-adapter/queries/expiredFacts"
+
+// soft close (default) — set valid_to รักษา bi-temporal history ไว้
+await purgeExpiredFacts({ organizationId: "org_001" })
+
+// hard delete — ลบทิ้งเลย (ใช้กรณี GDPR)
+await purgeExpiredFacts({ organizationId: "org_001", hardDelete: true })
+```
+
+---
+
 ## 🧩 Entity Resolution
 
 ระบบจะทำ Entity Resolution อัตโนมัติทุกครั้งที่เรียก `saveEntity` ที่มี `embedding` ส่งมาด้วย

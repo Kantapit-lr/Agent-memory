@@ -16,6 +16,7 @@ import { deleteEntity } from "@/src/repositories/nodes/deleteEntity"
 import { deleteOrganization } from "@/src/repositories/nodes/deleteOrganization"
 import { semanticSearch } from "@/src/repositories/queries/semanticSearch"
 import { findSimilarEntity } from "@/src/repositories/nodes/findSimilarEntity"
+import { getExpiredFacts, purgeExpiredFacts } from "@/src/repositories/queries/expiredFacts"
 import { getCodeDependencies } from "@/src/repositories/queries/getCodeDependencies"
 import driver from "@/src/db"
 
@@ -159,6 +160,43 @@ async function main() {
     const afterMerge = await findSimilarEntity({ organizationId: orgId, embedding: new Array(1024).fill(0.1) })
     console.log(`\n   🧩 [saveEntity duplicate] ผลหลัง merge → id: ${afterMerge?.id ?? "null"} (ควรเป็น person_02 ไม่ใช่ person_02_duplicate)`)
     console.log(`   ⏱️  ${(performance.now() - tMerge).toFixed(2)} ms`)
+
+    // ─────────────────────────────────────────
+    // EXPIRED FACTS PIPELINE
+    // ─────────────────────────────────────────
+    console.log("\n⏰ เริ่มต้นทดสอบ Expired Facts Pipeline...")
+
+    // สร้าง relationship ที่หมดอายุแล้ว (expires_at ในอดีต)
+    await linkEntityToEntity({
+      organizationId: orgId,
+      source_id: "person_02",
+      target_id: "org_02_business",
+      type: "FORMER_EMPLOYEE",
+      valid_from: "2025-01-01T00:00:00Z",
+      valid_to: null,
+      confidence_score: 0.9,
+      intent_category: "FACT",
+      criticality_score: 0.5,
+      sentiment: "NEUTRAL",
+      clearance_level: 1,
+      expires_at: "2025-12-31T00:00:00Z",  // หมดอายุแล้ว
+      justification: "สัญญาจ้างหมดอายุ"
+    })
+
+    const tExpired = performance.now()
+    const expiredFacts = await getExpiredFacts({ organizationId: orgId })
+    console.log(`\n   ⏰ [getExpiredFacts] พบ ${expiredFacts.length} relationship ที่หมดอายุ`)
+    expiredFacts.forEach((f) => console.log(`      - ${f.sourceName} -[${f.relationshipType}]-> ${f.targetName} | expires: ${f.expires_at}`))
+    console.log(`   ⏱️  ${(performance.now() - tExpired).toFixed(2)} ms`)
+
+    const tPurge = performance.now()
+    const purgeResult = await purgeExpiredFacts({ organizationId: orgId })
+    console.log(`\n   🧹 [purgeExpiredFacts] ปิดไปแล้ว ${purgeResult.purgedCount} relationship (soft close)`)
+    console.log(`   ⏱️  ${(performance.now() - tPurge).toFixed(2)} ms`)
+
+    // ตรวจสอบว่าหลัง purge แล้วไม่มีของหมดอายุเหลือ
+    const afterPurge = await getExpiredFacts({ organizationId: orgId })
+    console.log(`\n   ✅ หลัง purge: พบ ${afterPurge.length} relationship ที่หมดอายุ (ควรเป็น 0)`)
 
     // ─────────────────────────────────────────
     // SEMANTIC SEARCH PIPELINE
