@@ -502,6 +502,35 @@ const result = await getCodeDependencies({
 
 ---
 
+## 📦 Batch Operations
+
+รับ array แทนการเรียกทีละตัว ใช้เมื่อต้องการ ingest ข้อมูลจำนวนมาก
+
+### `saveEntities`
+```typescript
+import { saveEntities } from "@memory-layer/storage-adapter/nodes/saveEntities"
+
+const result = await saveEntities([
+  { organizationId: "org_001", id: "ent_01", name: "สมชาย", type: "PERSON", description: "..." },
+  { organizationId: "org_001", id: "ent_02", name: "สมหญิง", type: "PERSON", description: "..." }
+])
+// คืน: { saved: 2, failed: [] }
+```
+
+### `saveChunks`
+ระบบจะเรียง `sequence_order` อัตโนมัติก่อนบันทึก กัน `NEXT_CHUNK` ขาดตอน
+
+```typescript
+import { saveChunks } from "@memory-layer/storage-adapter/nodes/saveChunks"
+
+const result = await saveChunks([...chunks])
+// คืน: { saved: N, failed: [] }
+```
+
+**หมายเหตุ:** Entity ที่ error จะถูกเก็บไว้ใน `failed[]` แล้วดำเนินการต่อ ไม่หยุดทั้ง batch
+
+---
+
 ## 📊 Organization Stats
 
 ดึงสถิติภาพรวมของ org ใช้สำหรับ monitoring และ stress test

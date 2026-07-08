@@ -19,6 +19,8 @@ import { findSimilarEntity } from "@/src/repositories/nodes/findSimilarEntity"
 import { getExpiredFacts, purgeExpiredFacts } from "@/src/repositories/queries/expiredFacts"
 import { getDocuments } from "@/src/repositories/queries/getDocuments"
 import { getOrganizationStats } from "@/src/repositories/queries/getOrganizationStats"
+import { saveEntities } from "@/src/repositories/nodes/saveEntities"
+import { saveChunks } from "@/src/repositories/nodes/saveChunks"
 import { getCodeDependencies } from "@/src/repositories/queries/getCodeDependencies"
 import driver from "@/src/db"
 
@@ -162,6 +164,28 @@ async function main() {
     const afterMerge = await findSimilarEntity({ organizationId: orgId, embedding: new Array(1024).fill(0.1) })
     console.log(`\n   🧩 [saveEntity duplicate] ผลหลัง merge → id: ${afterMerge?.id ?? "null"} (ควรเป็น person_02 ไม่ใช่ person_02_duplicate)`)
     console.log(`   ⏱️  ${(performance.now() - tMerge).toFixed(2)} ms`)
+
+    // ─────────────────────────────────────────
+    // BATCH OPERATIONS PIPELINE
+    // ─────────────────────────────────────────
+    console.log("\n📦 เริ่มต้นทดสอบ Batch Operations Pipeline...")
+
+    const tBatchEntity = performance.now()
+    const batchEntityResult = await saveEntities([
+      { organizationId: orgId, id: "ent_batch_01", name: "สมชาย", type: "PERSON", description: "batch test 1" },
+      { organizationId: orgId, id: "ent_batch_02", name: "สมหญิง", type: "PERSON", description: "batch test 2" },
+      { organizationId: orgId, id: "ent_batch_03", name: "บริษัททดสอบ", type: "ORGANIZATION", description: "batch test 3" }
+    ])
+    console.log(`\n   📦 [saveEntities] saved: ${batchEntityResult.saved}, failed: ${batchEntityResult.failed.length}`)
+    console.log(`   ⏱️  ${(performance.now() - tBatchEntity).toFixed(2)} ms`)
+
+    const tBatchChunk = performance.now()
+    const batchChunkResult = await saveChunks([
+      { organizationId: orgId, id: "chunk_batch_02", source_type: "document", source_id: docId, text: "chunk batch ลำดับที่ 2", sequence_order: 2, embedding: new Array(1024).fill(0.4), mentioned_entities: [] },
+      { organizationId: orgId, id: "chunk_batch_01", source_type: "document", source_id: docId, text: "chunk batch ลำดับที่ 1", sequence_order: 1, embedding: new Array(1024).fill(0.35), mentioned_entities: [] },
+    ])
+    console.log(`\n   📦 [saveChunks] saved: ${batchChunkResult.saved}, failed: ${batchChunkResult.failed.length} (ส่งผิดลำดับ ระบบเรียงให้อัตโนมัติ)`)
+    console.log(`   ⏱️  ${(performance.now() - tBatchChunk).toFixed(2)} ms`)
 
     // ─────────────────────────────────────────
     // ORGANIZATION STATS PIPELINE
