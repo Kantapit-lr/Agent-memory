@@ -18,6 +18,7 @@ import { semanticSearch } from "@/src/repositories/queries/semanticSearch"
 import { findSimilarEntity } from "@/src/repositories/nodes/findSimilarEntity"
 import { getExpiredFacts, purgeExpiredFacts } from "@/src/repositories/queries/expiredFacts"
 import { getDocuments } from "@/src/repositories/queries/getDocuments"
+import { getOrganizationStats } from "@/src/repositories/queries/getOrganizationStats"
 import { getCodeDependencies } from "@/src/repositories/queries/getCodeDependencies"
 import driver from "@/src/db"
 
@@ -161,6 +162,20 @@ async function main() {
     const afterMerge = await findSimilarEntity({ organizationId: orgId, embedding: new Array(1024).fill(0.1) })
     console.log(`\n   🧩 [saveEntity duplicate] ผลหลัง merge → id: ${afterMerge?.id ?? "null"} (ควรเป็น person_02 ไม่ใช่ person_02_duplicate)`)
     console.log(`   ⏱️  ${(performance.now() - tMerge).toFixed(2)} ms`)
+
+    // ─────────────────────────────────────────
+    // ORGANIZATION STATS PIPELINE
+    // ─────────────────────────────────────────
+    console.log("\n📊 เริ่มต้นทดสอบ Organization Stats Pipeline...")
+
+    const tStats = performance.now()
+    const stats = await getOrganizationStats({ organizationId: orgId })
+    console.log(`\n   📊 [getOrganizationStats] ${orgId}`)
+    console.log(`      Nodes: Entity=${stats.entityCount}, Document=${stats.documentCount}, Episode=${stats.episodeCount}, Chunk=${stats.chunkCount}`)
+    console.log(`      Relationships: total=${stats.relationshipCount}, active=${stats.activeRelationshipCount}, expired=${stats.expiredRelationshipCount}, mentions=${stats.mentionCount}`)
+    console.log(`      Entity by type: ${stats.entityByType.map(e => `${e.type}(${e.count})`).join(", ")}`)
+    console.log(`      Document by language: ${stats.documentByLanguage.map(d => `${d.language}(${d.count})`).join(", ")}`)
+    console.log(`   ⏱️  ${(performance.now() - tStats).toFixed(2)} ms`)
 
     // ─────────────────────────────────────────
     // GET DOCUMENTS PIPELINE

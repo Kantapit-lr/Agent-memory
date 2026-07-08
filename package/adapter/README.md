@@ -502,6 +502,21 @@ const result = await getCodeDependencies({
 
 ---
 
+## 📊 Organization Stats
+
+ดึงสถิติภาพรวมของ org ใช้สำหรับ monitoring และ stress test
+
+```typescript
+import { getOrganizationStats } from "@memory-layer/storage-adapter/queries/getOrganizationStats"
+
+const stats = await getOrganizationStats({ organizationId: "org_001" })
+// คืน: entityCount, documentCount, episodeCount, chunkCount,
+//       relationshipCount, activeRelationshipCount, expiredRelationshipCount,
+//       mentionCount, entityByType[], documentByLanguage[]
+```
+
+---
+
 ## ⏰ Expired Facts
 
 ระบบจัดการ relationship ที่มี `expires_at` หมดอายุแล้ว มี 2 ฟังก์ชัน:
