@@ -20,18 +20,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
       {
-        name: "query_memory",
-        description: "ค้นหาข้อมูลเชิงลึกและข้อเท็จจริงจากฐานข้อมูลสมองกล (Graph+Vector) เพื่อตอบคำถาม",
-        inputSchema: {
-          type: "object",
-          properties: {
-            question: { type: "string", description: "คำถามที่ต้องการค้นหา" },
-            organizationId: { type: "string", description: "รหัสองค์กร (เช่น org_set_company)" }
-          },
-          required: ["question", "organizationId"]
-        }
-      },
-      {
         name: "get_entity_timeline",
         description: "ดึงข้อมูลประวัติและไทม์ไลน์เหตุการณ์ทั้งหมดที่เกี่ยวข้องกับ Entity นั้นๆ จัดเรียงตามเวลา",
         inputSchema: {
@@ -157,22 +145,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
   try {
-    if (name === "query_memory") {
-      const response = await fetch(`${API_BASE_URL}/query`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          question: args?.question,
-          organizationId: args?.organizationId,
-          activeOnly: false,
-          clearanceLevel: 4
-        })
-      });
-      const data = await response.json();
-      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
-    }
-
-    else if (name === "get_entity_timeline") {
+    if (name === "get_entity_timeline") {
       const response = await fetch(`${API_BASE_URL}/timeline`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -200,7 +173,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const response = await fetch(`${API_BASE_URL}/discover`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           keyword: args?.keyword,
           organizationId: args?.organizationId
         })
@@ -271,7 +244,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     else if (name === "get_document_tree") {
       const docId = encodeURIComponent(String(args?.documentId));
       let url = `${API_BASE_URL}/document/${docId}/tree`;
-      
+
       if (args?.organizationId) {
         url += `?orgId=${encodeURIComponent(String(args?.organizationId))}`;
       }

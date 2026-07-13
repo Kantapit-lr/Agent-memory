@@ -19,6 +19,7 @@ import { memorizeFact } from "./tools/memorizeFact";
 import { logEpisode } from "./tools/logEpisode";
 import { getCodeDependencies } from "../../adapter/src/repositories/queries/getCodeDependencies";
 import { semanticSearch } from "../../adapter/src/repositories/queries/semanticSearch";
+import { deleteDocument } from "../../adapter/src/repositories/nodes/deleteDocument";
 
 const isMock = process.env.USE_MOCK_AI === "true";
 
@@ -439,60 +440,6 @@ app.post("/api/memory/chat", async ({ body }) => {
   } catch (error: any) { return new Response(JSON.stringify({ error: error.message }), { status: 500 }); }
 });
 
-app.post("/api/memory/query", async ({ body }) => {
-  const session = driver.session();
-  try {
-    const { question, organizationId, activeOnly = false, clearanceLevel = 4, language } = body as any;
-    if (!question || question.trim() === "") return new Response(JSON.stringify({ error: "Missing 'question' field" }), { status: 400 });
-
-    const queryEmbeddings = await executeWithRetry(() => safeGenerateEmbeddings([question]));
-
-    let answer = "", retrievedContext = "";
-    let rawResults: any[] = [];
-
-    const result = await session.run(
-      `MATCH (c:Chunk) WHERE c.organizationId = $orgId AND c.embedding IS NOT NULL AND size(c.embedding) = size($queryEmbedding)
-       WITH c, vector.similarity.cosine(c.embedding, $queryEmbedding) AS score 
-       MATCH (d:Document) 
-       WHERE d.id = coalesce(c.source_id, c.sourceId) 
-         AND ($language IS NULL OR d.language = $language)
-       WITH c, d, score ORDER BY score DESC LIMIT 5
-       OPTIONAL MATCH (e1:Entity)-[r]->(e2:Entity)
-       WHERE e1.organizationId = $orgId AND c.text CONTAINS e1.name AND ($activeOnly = false OR r.valid_to IS NULL OR r.valid_to = "") AND (r.clearance_level IS NULL OR r.clearance_level <= $clearanceLevel)
-       RETURN c.id AS chunk_id, d.id AS document_id, c.text AS chunkText, score, collect(DISTINCT e1.name + " [" + type(r) + "] " + e2.name) AS graph_facts`,
-      {
-        orgId: organizationId,
-        queryEmbedding: queryEmbeddings[0],
-        activeOnly: activeOnly === true || activeOnly === "true",
-        clearanceLevel: Number(clearanceLevel),
-        language: language || null
-      }
-    );
-
-    rawResults = result.records.map((record: any) => ({
-      chunk_id: record.get('chunk_id'), document_id: record.get('document_id'), text: record.get('chunkText'), similarity_score: record.get('score'),
-      graph_facts: (record.get('graph_facts') || []).filter((f: string) => f !== null && f.trim() !== "")
-    }));
-
-    retrievedContext = rawResults.length > 0 ? rawResults.map(r => `[${r.chunk_id}] ${r.text}` + (r.graph_facts.length > 0 ? `\n[Graph]: ${r.graph_facts.join(", ")}` : "")).join("\n---\n") : "";
-
-    if (!retrievedContext) return { status: "success", question, answer: "Not found", citations: [], raw_query_result: [] };
-
-    if (isMock) {
-      answer = `[MOCK MODE] นี่คือคำตอบจำลองครับ! ข้อมูลอ้างอิงหลักที่เจอคือ [${rawResults[0]?.chunk_id || 'ไม่มี'}]`;
-    } else {
-      const aiResponse = await executeWithRetry(() => aiClient.chat.completions.create({
-        model: "anthropic/claude-sonnet-4-6", temperature: 0.1,
-        messages: [{ role: "system", content: "คุณคือผู้ช่วย AI จงตอบโดยอิงจากข้อมูลอ้างอิงเท่านั้น และต้องใส่รหัสอ้างอิง [chunk_id] ต่อท้ายประโยคเสมอ" }, { role: "user", content: `ข้อมูลอ้างอิง:\n${retrievedContext}\n\nคำถาม: ${question}` }]
-      }));
-      answer = aiResponse.choices[0]?.message?.content || "No generated answer";
-    }
-
-    return { status: "success", question, answer, citations: rawResults.map((r: any) => ({ document_id: r.document_id, chunk_id: r.chunk_id, text_preview: r.text.substring(0, 50) + "..." })), raw_query_result: rawResults };
-  } catch (error: any) { return new Response(JSON.stringify({ error: error.message }), { status: 500 }); }
-  finally { await session.close(); }
-});
-
 app.get("/api/memory/document/:documentId/tree", async ({ params, query }) => {
   try {
     const orgId = query.orgId as string || "org_pdf_default";
@@ -517,15 +464,22 @@ app.get("/api/memory/documents", async ({ query }) => {
   finally { await session.close(); }
 });
 
-app.delete("/api/memory/document/:documentId", async ({ params }) => {
-  const session = driver.session();
+app.delete("/api/memory/document/:documentId", async ({ params, query }) => {
   try {
-    const checkResult = await session.run(`MATCH (d:Document {id: $docId}) RETURN d.id AS id`, { docId: params.documentId });
-    if (checkResult.records.length === 0) return new Response(JSON.stringify({ status: "not_found" }), { status: 404 });
-    await session.run(`MATCH (d:Document {id: $docId}) OPTIONAL MATCH (d)-[:HAS_CHUNK]->(c:Chunk) DETACH DELETE d, c`, { docId: params.documentId });
-    return { status: "success" };
-  } catch (error: any) { return new Response(JSON.stringify({ error: error.message }), { status: 500 }); }
-  finally { await session.close(); }
+    const orgId = query.orgId as string || "org_001";
+
+    await deleteDocument({
+      organizationId: orgId,
+      documentId: params.documentId
+    });
+
+    return { 
+      status: "success", 
+      message: `Document ${params.documentId} deleted successfully` 
+    };
+  } catch (error: any) { 
+    return new Response(JSON.stringify({ error: error.message }), { status: 500 }); 
+  }
 });
 
 app.post("/api/memory/intent", async ({ body }) => {
