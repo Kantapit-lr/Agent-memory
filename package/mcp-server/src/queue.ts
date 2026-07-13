@@ -1,6 +1,6 @@
 import { Queue, Worker } from 'bullmq';
-import { saveEntity } from "../../adapter/src/repositories/nodes/saveEntity";
-import { saveChunk } from "../../adapter/src/repositories/nodes/saveChunk";
+import { saveEntities } from "../../adapter/src/repositories/nodes/saveEntities";
+import { saveChunks } from "../../adapter/src/repositories/nodes/saveChunks";
 import { syncRelationship } from "../../adapter/src/repositories/semantic";
 
 const connectionOptions = {
@@ -16,30 +16,38 @@ const worker = new Worker('ingestion', async job => {
   const { organizationId, chunks, entities, relationships } = job.data;
 
   if (entities && entities.length > 0) {
-    for (const entity of entities) {
-      await saveEntity({
-        organizationId,
-        id: entity.id,
-        name: entity.name,
-        type: entity.type,
-        description: entity.description || "",
-        embedding: entity.embedding || []
-      });
+    const formattedEntities = entities.map((entity: any) => ({
+      organizationId,
+      id: entity.id,
+      name: entity.name,
+      type: entity.type,
+      description: entity.description || "",
+      embedding: entity.embedding || []
+    }));
+    
+    const entityResult = await saveEntities(formattedEntities);
+    
+    if (entityResult?.failed && entityResult.failed.length > 0) {
+      console.error(`Failed to save entities:`, entityResult.failed);
     }
   }
 
   if (chunks && chunks.length > 0) {
-    for (const chunk of chunks) {
-      await saveChunk({
-        organizationId,
-        id: chunk.id,
-        source_type: chunk.source_type,
-        source_id: chunk.source_id,
-        text: chunk.text,
-        sequence_order: chunk.sequence_order,
-        embedding: chunk.embedding,
-        mentioned_entities: chunk.mentioned_entities
-      });
+    const formattedChunks = chunks.map((chunk: any) => ({
+      organizationId,
+      id: chunk.id,
+      source_type: chunk.source_type,
+      source_id: chunk.source_id,
+      text: chunk.text,
+      sequence_order: chunk.sequence_order,
+      embedding: chunk.embedding,
+      mentioned_entities: chunk.mentioned_entities
+    }));
+    
+    const chunkResult = await saveChunks(formattedChunks);
+    
+    if (chunkResult?.failed && chunkResult.failed.length > 0) {
+      console.error(`Failed to save chunks:`, chunkResult.failed);
     }
   }
 

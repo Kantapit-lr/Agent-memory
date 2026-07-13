@@ -20,6 +20,7 @@ import { logEpisode } from "./tools/logEpisode";
 import { getCodeDependencies } from "../../adapter/src/repositories/queries/getCodeDependencies";
 import { semanticSearch } from "../../adapter/src/repositories/queries/semanticSearch";
 import { deleteDocument } from "../../adapter/src/repositories/nodes/deleteDocument";
+import { getDocuments } from "../../adapter/src/repositories/queries/getDocuments";
 
 const isMock = process.env.USE_MOCK_AI === "true";
 
@@ -43,7 +44,23 @@ const safeGenerateEmbeddings = async (texts: string[]) => {
   if (isMock) {
     return texts.map(() => Array(1024).fill(0.123));
   }
-  return generateEmbeddings(texts);
+  
+  const response = await fetch("https://api.cohere.ai/v1/embed", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${process.env.COHERE_API_KEY}`
+    },
+    body: JSON.stringify({
+      texts: texts,
+      model: "embed-multilingual-v3.0",
+      input_type: "search_document"
+    })
+  });
+  
+  const data = await response.json();
+  if (data.message) throw new Error(`Cohere Error: ${data.message}`);
+  return data.embeddings;
 };
 
 const aiClient = new OpenAI({
@@ -449,19 +466,28 @@ app.get("/api/memory/document/:documentId/tree", async ({ params, query }) => {
   } catch (error: any) { return new Response(JSON.stringify({ error: error.message }), { status: 500 }); }
 });
 
-app.get("/api/memory/documents", async ({ query }) => {
-  const session = driver.session();
+app.post("/api/memory/documents", async ({ body }) => {
   try {
-    const orgId = query.orgId as string | undefined;
-    const cypherQuery = orgId ? `MATCH (d:Document {organizationId: $orgId}) OPTIONAL MATCH (d)-[:HAS_CHUNK]->(c:Chunk) RETURN d.id AS id, d.title AS title, d.type AS type, count(c) AS total_chunks ORDER BY d.id DESC` : `MATCH (d:Document) OPTIONAL MATCH (d)-[:HAS_CHUNK]->(c:Chunk) RETURN d.id AS id, d.title AS title, d.organizationId AS organizationId, d.type AS type, count(c) AS total_chunks ORDER BY d.id DESC`;
-    const result = await session.run(cypherQuery, orgId ? { orgId } : {});
-    const documents = result.records.map((record: any) => {
-      const doc: any = { document_id: record.get('id'), title: record.get('title'), type: record.get('type'), total_chunks: record.get('total_chunks').toNumber() };
-      if (!orgId) doc.organizationId = record.get('organizationId'); return doc;
+    const { organizationId, language, type } = body as any;
+
+    if (!organizationId) {
+      return new Response(JSON.stringify({ error: "Missing organizationId" }), { status: 400 });
+    }
+
+    const docs = await getDocuments({
+      organizationId,
+      language,
+      type
     });
-    return { status: "success", total_documents: documents.length, documents: documents };
-  } catch (error: any) { return new Response(JSON.stringify({ error: error.message }), { status: 500 }); }
-  finally { await session.close(); }
+
+    return { 
+      status: "success", 
+      total_documents: docs.length, 
+      documents: docs 
+    };
+  } catch (error: any) { 
+    return new Response(JSON.stringify({ error: error.message }), { status: 500 }); 
+  }
 });
 
 app.delete("/api/memory/document/:documentId", async ({ params, query }) => {
@@ -616,13 +642,22 @@ app.post("/api/memory/semantic_search", async ({ body }) => {
       }), { status: 400 });
     }
 
-    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-    const embeddingResponse = await openai.embeddings.create({
-      model: "text-embedding-3-small",
-      input: query,
+    const response = await fetch("https://api.cohere.ai/v1/embed", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${process.env.COHERE_API_KEY}`
+      },
+      body: JSON.stringify({
+        texts: [query],
+        model: "embed-multilingual-v3.0",
+        input_type: "search_query"
+      })
     });
     
-    const queryEmbedding = embeddingResponse.data[0].embedding;
+    const data = await response.json();
+    if (data.message) throw new Error(`Cohere Error: ${data.message}`);
+    const queryEmbedding = data.embeddings[0];
 
     const results = await semanticSearch({
       organizationId,

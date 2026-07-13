@@ -123,6 +123,19 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
+        name: "list_documents",
+        description: "ดึงรายชื่อเอกสารทั้งหมดในองค์กร พร้อมจำนวน Chunk เพื่อดูว่ามีเอกสารอะไรให้ค้นหาบ้าง",
+        inputSchema: {
+          type: "object",
+          properties: {
+            organizationId: { type: "string", description: "รหัสองค์กร เช่น org_001" },
+            language: { type: "string", description: "กรองตามภาษา (ถ้ามี) เช่น TH, EN" },
+            type: { type: "string", description: "กรองตามประเภท (ถ้ามี) เช่น PDF, CODE, TEXT" }
+          },
+          required: ["organizationId"]
+        }
+      },
+      {
         name: "ingest_document",
         description: "อัปโหลดและนำเข้าเอกสาร/ไฟล์เข้าสู่ระบบเพื่อสกัดเป็น Knowledge Graph (ทำงานแบบ Async Background)",
         inputSchema: {
@@ -143,7 +156,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
-
+  console.error(`\n🤖 [MCP Server] Agent กำลังเรียกใช้ Tool: 👉 ${name} 👈`);
+  console.error(`📦 ข้อมูลที่ Agent ส่งมา (Arguments):`, JSON.stringify(args, null, 2));
   try {
     if (name === "get_entity_timeline") {
       const response = await fetch(`${API_BASE_URL}/timeline`, {
@@ -164,6 +178,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query: args?.query })
+      });
+      const data = await response.json();
+      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    }
+
+    else if (name === "list_documents") {
+      const response = await fetch(`${API_BASE_URL}/documents`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          organizationId: args?.organizationId,
+          language: args?.language,
+          type: args?.type
+        })
       });
       const data = await response.json();
       return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
