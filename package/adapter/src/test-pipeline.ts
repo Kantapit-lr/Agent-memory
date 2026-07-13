@@ -16,6 +16,11 @@ import { deleteEntity } from "@/src/repositories/nodes/deleteEntity"
 import { deleteOrganization } from "@/src/repositories/nodes/deleteOrganization"
 import { semanticSearch } from "@/src/repositories/queries/semanticSearch"
 import { findSimilarEntity } from "@/src/repositories/nodes/findSimilarEntity"
+import { getExpiredFacts, purgeExpiredFacts } from "@/src/repositories/queries/expiredFacts"
+import { getDocuments } from "@/src/repositories/queries/getDocuments"
+import { getOrganizationStats } from "@/src/repositories/queries/getOrganizationStats"
+import { saveEntities } from "@/src/repositories/nodes/saveEntities"
+import { saveChunks } from "@/src/repositories/nodes/saveChunks"
 import { getCodeDependencies } from "@/src/repositories/queries/getCodeDependencies"
 import driver from "@/src/db"
 
@@ -159,6 +164,96 @@ async function main() {
     const afterMerge = await findSimilarEntity({ organizationId: orgId, embedding: new Array(1024).fill(0.1) })
     console.log(`\n   🧩 [saveEntity duplicate] ผลหลัง merge → id: ${afterMerge?.id ?? "null"} (ควรเป็น person_02 ไม่ใช่ person_02_duplicate)`)
     console.log(`   ⏱️  ${(performance.now() - tMerge).toFixed(2)} ms`)
+
+    // ─────────────────────────────────────────
+    // BATCH OPERATIONS PIPELINE
+    // ─────────────────────────────────────────
+    console.log("\n📦 เริ่มต้นทดสอบ Batch Operations Pipeline...")
+
+    const tBatchEntity = performance.now()
+    const batchEntityResult = await saveEntities([
+      { organizationId: orgId, id: "ent_batch_01", name: "สมชาย", type: "PERSON", description: "batch test 1" },
+      { organizationId: orgId, id: "ent_batch_02", name: "สมหญิง", type: "PERSON", description: "batch test 2" },
+      { organizationId: orgId, id: "ent_batch_03", name: "บริษัททดสอบ", type: "ORGANIZATION", description: "batch test 3" }
+    ])
+    console.log(`\n   📦 [saveEntities] saved: ${batchEntityResult.saved}, failed: ${batchEntityResult.failed.length}`)
+    console.log(`   ⏱️  ${(performance.now() - tBatchEntity).toFixed(2)} ms`)
+
+    const tBatchChunk = performance.now()
+    const batchChunkResult = await saveChunks([
+      { organizationId: orgId, id: "chunk_batch_02", source_type: "document", source_id: docId, text: "chunk batch ลำดับที่ 2", sequence_order: 2, embedding: new Array(1024).fill(0.4), mentioned_entities: [] },
+      { organizationId: orgId, id: "chunk_batch_01", source_type: "document", source_id: docId, text: "chunk batch ลำดับที่ 1", sequence_order: 1, embedding: new Array(1024).fill(0.35), mentioned_entities: [] },
+    ])
+    console.log(`\n   📦 [saveChunks] saved: ${batchChunkResult.saved}, failed: ${batchChunkResult.failed.length} (ส่งผิดลำดับ ระบบเรียงให้อัตโนมัติ)`)
+    console.log(`   ⏱️  ${(performance.now() - tBatchChunk).toFixed(2)} ms`)
+
+    // ─────────────────────────────────────────
+    // ORGANIZATION STATS PIPELINE
+    // ─────────────────────────────────────────
+    console.log("\n📊 เริ่มต้นทดสอบ Organization Stats Pipeline...")
+
+    const tStats = performance.now()
+    const stats = await getOrganizationStats({ organizationId: orgId })
+    console.log(`\n   📊 [getOrganizationStats] ${orgId}`)
+    console.log(`      Nodes: Entity=${stats.entityCount}, Document=${stats.documentCount}, Episode=${stats.episodeCount}, Chunk=${stats.chunkCount}`)
+    console.log(`      Relationships: total=${stats.relationshipCount}, active=${stats.activeRelationshipCount}, expired=${stats.expiredRelationshipCount}, mentions=${stats.mentionCount}`)
+    console.log(`      Entity by type: ${stats.entityByType.map(e => `${e.type}(${e.count})`).join(", ")}`)
+    console.log(`      Document by language: ${stats.documentByLanguage.map(d => `${d.language}(${d.count})`).join(", ")}`)
+    console.log(`   ⏱️  ${(performance.now() - tStats).toFixed(2)} ms`)
+
+    // ─────────────────────────────────────────
+    // GET DOCUMENTS PIPELINE
+    // ─────────────────────────────────────────
+    console.log("\n📋 เริ่มต้นทดสอบ Get Documents Pipeline...")
+
+    const tDocs = performance.now()
+    const docs = await getDocuments({ organizationId: orgId })
+    console.log(`\n   📋 [getDocuments] พบ ${docs.length} document`)
+    docs.forEach((d) => console.log(`      - [${d.id}] "${d.title}" (${d.type}/${d.language}) | ${d.chunkCount} chunks`))
+    console.log(`   ⏱️  ${(performance.now() - tDocs).toFixed(2)} ms`)
+
+    // ทดสอบ filter ตาม language
+    const tDocsFilter = performance.now()
+    const docsTH = await getDocuments({ organizationId: orgId, language: "TH" })
+    console.log(`\n   📋 [getDocuments + filter] language=TH → พบ ${docsTH.length} document`)
+    console.log(`   ⏱️  ${(performance.now() - tDocsFilter).toFixed(2)} ms`)
+
+    // ─────────────────────────────────────────
+    // EXPIRED FACTS PIPELINE
+    // ─────────────────────────────────────────
+    console.log("\n⏰ เริ่มต้นทดสอบ Expired Facts Pipeline...")
+
+    // สร้าง relationship ที่หมดอายุแล้ว (expires_at ในอดีต)
+    await linkEntityToEntity({
+      organizationId: orgId,
+      source_id: "person_02",
+      target_id: "org_02_business",
+      type: "FORMER_EMPLOYEE",
+      valid_from: "2025-01-01T00:00:00Z",
+      valid_to: null,
+      confidence_score: 0.9,
+      intent_category: "FACT",
+      criticality_score: 0.5,
+      sentiment: "NEUTRAL",
+      clearance_level: 1,
+      expires_at: "2025-12-31T00:00:00Z",  // หมดอายุแล้ว
+      justification: "สัญญาจ้างหมดอายุ"
+    })
+
+    const tExpired = performance.now()
+    const expiredFacts = await getExpiredFacts({ organizationId: orgId })
+    console.log(`\n   ⏰ [getExpiredFacts] พบ ${expiredFacts.length} relationship ที่หมดอายุ`)
+    expiredFacts.forEach((f) => console.log(`      - ${f.sourceName} -[${f.relationshipType}]-> ${f.targetName} | expires: ${f.expires_at}`))
+    console.log(`   ⏱️  ${(performance.now() - tExpired).toFixed(2)} ms`)
+
+    const tPurge = performance.now()
+    const purgeResult = await purgeExpiredFacts({ organizationId: orgId })
+    console.log(`\n   🧹 [purgeExpiredFacts] ปิดไปแล้ว ${purgeResult.purgedCount} relationship (soft close)`)
+    console.log(`   ⏱️  ${(performance.now() - tPurge).toFixed(2)} ms`)
+
+    // ตรวจสอบว่าหลัง purge แล้วไม่มีของหมดอายุเหลือ
+    const afterPurge = await getExpiredFacts({ organizationId: orgId })
+    console.log(`\n   ✅ หลัง purge: พบ ${afterPurge.length} relationship ที่หมดอายุ (ควรเป็น 0)`)
 
     // ─────────────────────────────────────────
     // SEMANTIC SEARCH PIPELINE

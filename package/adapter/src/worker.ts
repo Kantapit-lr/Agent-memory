@@ -1,7 +1,7 @@
 import { Worker, type Job } from "bullmq"
 import type { IngestionJobData } from "@/src/queue"
-import { saveEntity } from "@/src/repositories/nodes/saveEntity"
-import { saveChunk } from "@/src/repositories/nodes/saveChunk"
+import { saveEntities } from "@/src/repositories/nodes/saveEntities"
+import { saveChunks } from "@/src/repositories/nodes/saveChunks"
 import { syncRelationship } from "@/src/repositories/semantic"
 import driver from "@/src/db"
 
@@ -17,31 +17,11 @@ const worker = new Worker<IngestionJobData>(
 
     console.log(`📥 [Worker] รับ job ${job.id} | org: ${organizationId}`)
 
-    for (const entity of entities) {
-      await saveEntity({
-        organizationId,
-        id: entity.id,
-        name: entity.name,
-        type: entity.type,
-        description: entity.description,
-        embedding: entity.embedding,  // ส่ง embedding มาด้วยเพื่อให้ Entity Resolution ทำงานได้
-      })
-    }
-    console.log(`   ✅ saveEntity x${entities.length}`)
+    const entityResult = await saveEntities(entities.map(e => ({ ...e, organizationId })))
+    console.log(`   ✅ saveEntity x${entities.length} (failed: ${entityResult.failed.length})`)
 
-    for (const chunk of chunks) {
-      await saveChunk({
-        organizationId,
-        id: chunk.id,
-        source_type: chunk.source_type,
-        source_id: chunk.source_id,
-        text: chunk.text,
-        sequence_order: chunk.sequence_order,
-        embedding: chunk.embedding,
-        mentioned_entities: chunk.mentioned_entities,
-      })
-    }
-    console.log(`   ✅ saveChunk x${chunks.length}`)
+    const chunkResult = await saveChunks(chunks.map(c => ({ ...c, organizationId })))
+    console.log(`   ✅ saveChunk x${chunks.length} (failed: ${chunkResult.failed.length})`)
 
     for (const rel of relationships) {
       await syncRelationship({
@@ -61,7 +41,27 @@ const worker = new Worker<IngestionJobData>(
       })
     }
     console.log(`   ✅ syncRelationship x${relationships.length}`)
-    console.log(`🎉 [Worker] job ${job.id} เสร็จแล้ว`)
+    const summary = {
+      saved: {
+        entities: entityResult.saved,
+        chunks: chunkResult.saved,
+        relationships: relationships.length
+      },
+      failed: {
+        entities: entityResult.failed,
+        chunks: chunkResult.failed
+      }
+    }
+
+    if (entityResult.failed.length > 0 || chunkResult.failed.length > 0) {
+      console.warn(`⚠️  [Worker] job ${job.id} เสร็จแต่มี error บางส่วน:`, JSON.stringify(summary.failed))
+    } else {
+      console.log(`🎉 [Worker] job ${job.id} เสร็จสมบูรณ์`)
+    }
+
+    // return summary เพื่อให้ BullMQ เก็บไว้ใน job.returnvalue
+    // ดูได้ภายหลังผ่าน queue.getJob(jobId) หรือ BullMQ Dashboard
+    return summary
   },
   { connection }
 )

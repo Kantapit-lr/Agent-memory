@@ -413,7 +413,23 @@ const filtered = await getEntityTimeline({
 
 ---
 
-### 6. `semanticSearch`
+### 6. `getDocuments`
+
+ดึงรายชื่อ Document ทั้งหมดใน org พร้อม `chunkCount` ใช้ก่อนเรียก `getDocumentTree` เพื่อให้ Agent รู้ว่ามีเอกสารอะไรบ้าง
+
+```typescript
+import { getDocuments } from "@memory-layer/storage-adapter/queries/getDocuments"
+
+const docs = await getDocuments({
+  organizationId: "org_001",
+  language: "TH",  // optional
+  type: "PDF"      // optional
+})
+```
+
+---
+
+### 7. `semanticSearch`
 
 ค้นหา Chunk ที่ใกล้เคียงกับ query มากที่สุด โดยใช้ Vector Similarity (Cosine) พร้อม filter activeOnly, clearanceLevel, langFilter
 
@@ -486,6 +502,81 @@ const result = await getCodeDependencies({
 
 ---
 
+## 📦 Batch Operations
+
+รับ array แทนการเรียกทีละตัว ใช้เมื่อต้องการ ingest ข้อมูลจำนวนมาก
+
+### `saveEntities`
+```typescript
+import { saveEntities } from "@memory-layer/storage-adapter/nodes/saveEntities"
+
+const result = await saveEntities([
+  { organizationId: "org_001", id: "ent_01", name: "สมชาย", type: "PERSON", description: "..." },
+  { organizationId: "org_001", id: "ent_02", name: "สมหญิง", type: "PERSON", description: "..." }
+])
+// คืน: { saved: 2, failed: [] }
+```
+
+### `saveChunks`
+ระบบจะเรียง `sequence_order` อัตโนมัติก่อนบันทึก กัน `NEXT_CHUNK` ขาดตอน
+
+```typescript
+import { saveChunks } from "@memory-layer/storage-adapter/nodes/saveChunks"
+
+const result = await saveChunks([...chunks])
+// คืน: { saved: N, failed: [] }
+```
+
+**หมายเหตุ:** Entity ที่ error จะถูกเก็บไว้ใน `failed[]` แล้วดำเนินการต่อ ไม่หยุดทั้ง batch
+
+---
+
+## 📊 Organization Stats
+
+ดึงสถิติภาพรวมของ org ใช้สำหรับ monitoring และ stress test
+
+```typescript
+import { getOrganizationStats } from "@memory-layer/storage-adapter/queries/getOrganizationStats"
+
+const stats = await getOrganizationStats({ organizationId: "org_001" })
+// คืน: entityCount, documentCount, episodeCount, chunkCount,
+//       relationshipCount, activeRelationshipCount, expiredRelationshipCount,
+//       mentionCount, entityByType[], documentByLanguage[]
+```
+
+---
+
+## ⏰ Expired Facts
+
+ระบบจัดการ relationship ที่มี `expires_at` หมดอายุแล้ว มี 2 ฟังก์ชัน:
+
+### `getExpiredFacts`
+ดึง relationship ที่หมดอายุแล้วทั้งหมด ใช้สำหรับ monitoring ก่อน purge
+
+```typescript
+import { getExpiredFacts } from "@memory-layer/storage-adapter/queries/expiredFacts"
+
+const expired = await getExpiredFacts({
+  organizationId: "org_001",
+  asOf: "2026-01-01T00:00:00Z"  // optional default = ปัจจุบัน
+})
+```
+
+### `purgeExpiredFacts`
+ปิดหรือลบ relationship ที่หมดอายุ
+
+```typescript
+import { purgeExpiredFacts } from "@memory-layer/storage-adapter/queries/expiredFacts"
+
+// soft close (default) — set valid_to รักษา bi-temporal history ไว้
+await purgeExpiredFacts({ organizationId: "org_001" })
+
+// hard delete — ลบทิ้งเลย (ใช้กรณี GDPR)
+await purgeExpiredFacts({ organizationId: "org_001", hardDelete: true })
+```
+
+---
+
 ## 🧩 Entity Resolution
 
 ระบบจะทำ Entity Resolution อัตโนมัติทุกครั้งที่เรียก `saveEntity` ที่มี `embedding` ส่งมาด้วย
@@ -539,6 +630,8 @@ await deleteChunk({
 **⚠️ หมายเหตุสำคัญ:** ฟังก์ชันนี้ไม่ซ่อม `NEXT_CHUNK` ของก้อนข้างเคียงให้อัตโนมัติ
 ถ้าลบ chunk ตรงกลาง (เช่น chunk_02 จากสาย chunk_01→chunk_02→chunk_03) ลำดับจะขาดตอน
 ต้องจัดการ re-link เองถ้าต้องการ
+
+> **Technical Debt:** ถ้าในอนาคตมีการลบ Chunk ตรงกลาง เนื้อหาเอกสารตอน Agent เรียก `get_document_tree` อาจแหว่งได้ ควรพิจารณาเพิ่ม auto-relink `NEXT_CHUNK` ในภายหลัง
 
 **⚠️ Error ที่อาจเกิดขึ้น:** `OrganizationNotFoundError`, `ChunkNotFoundError`
 
