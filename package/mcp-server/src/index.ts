@@ -432,7 +432,18 @@ app.post("/api/memory/chat", async ({ body }) => {
       executeWithRetry(() => safeGenerateEmbeddings([message]))
     ]);
 
-    const graphData = JSON.parse(rawResult);
+    let cleanJson = rawResult;
+    if (typeof rawResult === 'string') {
+      const match = rawResult.match(/\{[\s\S]*\}/);
+      if (match) {
+        cleanJson = match[0];
+      } else {
+        cleanJson = rawResult.replace(/```json/gi, '').replace(/```/g, '').trim();
+      }
+    }
+    
+    const graphData = JSON.parse(cleanJson);
+
     const mentionedEntitiesForChunk: any[] = [];
     const entities = graphData.entities || [];
     const relationships = graphData.relationships || [];
@@ -454,7 +465,9 @@ app.post("/api/memory/chat", async ({ body }) => {
     }
 
     return { status: "success", message: "Processing completed", episode_id: episodeId, metrics: { entities: entities.length, relationships: relationships.length } };
-  } catch (error: any) { return new Response(JSON.stringify({ error: error.message }), { status: 500 }); }
+  } catch (error: any) { 
+    return new Response(JSON.stringify({ error: error.message }), { status: 500 }); 
+  }
 });
 
 app.get("/api/memory/document/:documentId/tree", async ({ params, query }) => {

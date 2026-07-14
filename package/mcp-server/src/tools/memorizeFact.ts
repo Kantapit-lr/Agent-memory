@@ -1,7 +1,6 @@
 import { randomUUID } from "crypto";
 import { saveEntity } from "../../../adapter/src/repositories/nodes/saveEntity";
 import { syncRelationship } from "../../../adapter/src/repositories/semantic";
-import OpenAI from "openai";
 
 export interface FactPayload {
   subject: string;
@@ -21,16 +20,26 @@ export async function memorizeFact(payload: FactPayload) {
   const subjectId = generateId("ent_mem", payload.subject);
   const objectId = generateId("ent_mem", payload.object);
 
-  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
   try {
-    const [subEmbedRes, objEmbedRes] = await Promise.all([
-      openai.embeddings.create({ model: "text-embedding-3-small", input: payload.subject }),
-      openai.embeddings.create({ model: "text-embedding-3-small", input: payload.object })
-    ]);
+    const response = await fetch("https://api.cohere.ai/v1/embed", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${process.env.COHERE_API_KEY}`
+      },
+      body: JSON.stringify({
+        texts: [payload.subject, payload.object],
+        model: "embed-multilingual-v3.0",
+        input_type: "search_document"
+      })
+    });
 
-    const subjectEmbedding = subEmbedRes.data[0].embedding;
-    const objectEmbedding = objEmbedRes.data[0].embedding;
+    const data = await response.json();
+    if (data.message) throw new Error(`Cohere Error: ${data.message}`);
+
+    // ดึง Vector ออกมาตามลำดับ Index
+    const subjectEmbedding = data.embeddings[0];
+    const objectEmbedding = data.embeddings[1];
 
     await saveEntity({
       organizationId: orgId,
