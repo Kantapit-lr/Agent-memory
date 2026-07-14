@@ -20,7 +20,7 @@ export async function findSimilarEntity(data: {
   limit?: number
 }): Promise<SimilarEntityResult | null> {
   const session = driver.session()
-  const threshold = data.threshold ?? 0.92
+  const threshold = data.threshold ?? 0.85
   const limit = data.limit ?? 1
 
   try {
