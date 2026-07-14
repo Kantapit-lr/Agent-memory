@@ -533,6 +533,10 @@ const result = await saveChunks([...chunks])
 
 ## 📊 Organization Stats
 
+> **⚠️ Maintenance Tool เท่านั้น** — ใช้สำหรับ admin monitor และ stress test ไม่เหมาะให้ Agent เรียกในการทำงานปกติ
+
+## 📊 Organization Stats
+
 ดึงสถิติภาพรวมของ org ใช้สำหรับ monitoring และ stress test
 
 ```typescript
@@ -545,6 +549,10 @@ const stats = await getOrganizationStats({ organizationId: "org_001" })
 ```
 
 ---
+
+## ⏰ Expired Facts
+
+> **⚠️ Maintenance Tool เท่านั้น** — ไม่ควรเปิดเป็น MCP tool ให้ Agent เรียกโดยตรง เพราะขัดกับ spec ที่ระบุว่าระบบนี้เป็นแค่หน่วยความจำ ไม่มีสิทธิ์ตัดสินใจลบข้อมูลแทนผู้ใช้ ให้ admin รันเองเท่านั้น
 
 ## ⏰ Expired Facts
 
