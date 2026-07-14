@@ -24,7 +24,8 @@ import { getDocuments } from "../../adapter/src/repositories/queries/getDocument
 
 const isMock = process.env.USE_MOCK_AI === "true";
 
-const safeExtractGraphData = async (text: string, orgId: string) => {
+// 1. รับค่า referenceDate เพิ่มเข้ามา (ทำไปแล้ว)
+const safeExtractGraphData = async (text: string, orgId: string, referenceDate?: string) => {
   if (isMock) {
     const timestamp = Date.now();
     return JSON.stringify({
@@ -37,7 +38,7 @@ const safeExtractGraphData = async (text: string, orgId: string) => {
       ]
     });
   }
-  return extractGraphData(text, orgId);
+  return extractGraphData(text, orgId, referenceDate);
 };
 
 const safeGenerateEmbeddings = async (texts: string[]) => {
@@ -95,7 +96,7 @@ const app = new Elysia();
 
 app.post("/api/memory/ingest", async ({ body }) => {
   try {
-    const { text, organizationId, documentId, title, language, clearance_level } = body as any;
+    const { text, organizationId, documentId, title, language, clearance_level, referenceDate } = body as any;
     const chunks = chunkText(text, 2000, 200);
 
     await saveOrganization({ id: organizationId, name: "Organization", created_at: new Date().toISOString() });
@@ -115,7 +116,7 @@ app.post("/api/memory/ingest", async ({ body }) => {
       await Promise.all(batch.map(async (chunk) => {
         try {
           const [rawResult, chunkEmbeddings] = await Promise.all([
-            executeWithRetry(() => safeExtractGraphData(chunk.text, organizationId)),
+            executeWithRetry(() => safeExtractGraphData(chunk.text, organizationId, referenceDate)),
             executeWithRetry(() => safeGenerateEmbeddings([chunk.text]))
           ]);
 
@@ -124,8 +125,20 @@ app.post("/api/memory/ingest", async ({ body }) => {
           const entities = graphData.entities || [];
           const relationships = graphData.relationships || [];
 
-          for (const entity of entities) {
+          // ----------------------------------------------------
+          // 🚀 แก้ไข Task 1: สร้าง Embeddings ให้ Entities ทุกตัว
+          // ----------------------------------------------------
+          const entityTexts = entities.map((e: any) => `${e.name} ${e.description || ''}`.trim());
+          let entityEmbeds: number[][] = [];
+          if (entityTexts.length > 0) {
+            entityEmbeds = await executeWithRetry(() => safeGenerateEmbeddings(entityTexts));
+          }
+
+          for (let j = 0; j < entities.length; j++) {
+            const entity = entities[j];
+            entity.embedding = entityEmbeds[j] || []; // แนบ Embedding เข้าไปให้ Worker จัดการ Deduplicate
             allEntities.push(entity);
+            
             mentionedEntitiesForChunk.push({
               entity_id: entity.id,
               valid_from: entity.valid_from || new Date().toISOString(),
@@ -159,7 +172,7 @@ app.post("/api/memory/ingest", async ({ body }) => {
     const job = await ingestQueue.add("ingest-text-job", {
       organizationId,
       chunks: allChunks,
-      entities: allEntities,
+      entities: allEntities, // ส่ง Entity ที่มี Embedding ไปเข้าคิว
       relationships: allRelationships
     });
 
@@ -169,7 +182,7 @@ app.post("/api/memory/ingest", async ({ body }) => {
 
 app.post("/api/memory/ingest/pdf", async ({ body }) => {
   try {
-    const { file, organizationId, title, language, clearance_level } = body as any;
+    const { file, organizationId, title, language, clearance_level, referenceDate } = body as any;
     if (!file) return new Response(JSON.stringify({ error: "Missing PDF file" }), { status: 400 });
 
     const orgId = organizationId || "org_pdf_default";
@@ -192,7 +205,7 @@ app.post("/api/memory/ingest/pdf", async ({ body }) => {
       await Promise.all(batch.map(async (chunk) => {
         try {
           const [rawResult, chunkEmbeddings] = await Promise.all([
-            executeWithRetry(() => safeExtractGraphData(chunk.text, orgId)),
+            executeWithRetry(() => safeExtractGraphData(chunk.text, orgId, referenceDate)),
             executeWithRetry(() => safeGenerateEmbeddings([chunk.text]))
           ]);
 
@@ -201,8 +214,20 @@ app.post("/api/memory/ingest/pdf", async ({ body }) => {
           const entities = graphData.entities || [];
           const relationships = graphData.relationships || [];
 
-          for (const entity of entities) {
+          // ----------------------------------------------------
+          // 🚀 แก้ไข Task 1: สร้าง Embeddings ให้ Entities ทุกตัว
+          // ----------------------------------------------------
+          const entityTexts = entities.map((e: any) => `${e.name} ${e.description || ''}`.trim());
+          let entityEmbeds: number[][] = [];
+          if (entityTexts.length > 0) {
+            entityEmbeds = await executeWithRetry(() => safeGenerateEmbeddings(entityTexts));
+          }
+
+          for (let j = 0; j < entities.length; j++) {
+            const entity = entities[j];
+            entity.embedding = entityEmbeds[j] || []; // แนบ Embedding เข้าไป
             allEntities.push(entity);
+            
             mentionedEntitiesForChunk.push({
               entity_id: entity.id, valid_from: entity.valid_from || new Date().toISOString(), valid_to: entity.valid_to || null,
               confidence_score: entity.confidence_score ?? 0.9, intent_category: entity.intent_category || "FACT", criticality_score: entity.criticality_score ?? 0.5, sentiment: entity.sentiment || "NEUTRAL", clearance_level: cLevel, expires_at: entity.expires_at || null, justification: entity.justification || `Extracted chunk: ${chunk.id}`
@@ -228,7 +253,7 @@ app.post("/api/memory/ingest/pdf", async ({ body }) => {
     const job = await ingestQueue.add("ingest-pdf-job", {
       organizationId: orgId,
       chunks: allChunks,
-      entities: allEntities,
+      entities: allEntities, // ส่ง Entity ที่มี Embedding ไปเข้าคิว
       relationships: allRelationships
     });
 
@@ -297,8 +322,20 @@ app.post("/api/memory/ingest/image", async ({ body }) => {
     const entities = extractedGraph.entities || [];
     const relationships = extractedGraph.relationships || [];
 
-    for (const entity of entities) {
+    // ----------------------------------------------------
+    // 🚀 แก้ไข Task 1: สร้าง Embeddings ให้ Entities ทุกตัว
+    // ----------------------------------------------------
+    const entityTexts = entities.map((e: any) => `${e.name} ${e.description || ''}`.trim());
+    let entityEmbeds: number[][] = [];
+    if (entityTexts.length > 0) {
+      entityEmbeds = await executeWithRetry(() => safeGenerateEmbeddings(entityTexts));
+    }
+
+    for (let j = 0; j < entities.length; j++) {
+      const entity = entities[j];
       entity.id = entity.id.startsWith("ent_") ? `${entity.id}_${Date.now()}` : `ent_${Date.now()}`;
+      entity.embedding = entityEmbeds[j] || []; // แนบ Embedding
+      
       mentionedEntitiesForChunk.push({
         entity_id: entity.id, valid_from: entity.valid_from || new Date().toISOString(), valid_to: entity.valid_to || null,
         confidence_score: entity.confidence_score ?? 0.9, intent_category: entity.intent_category || "FACT", criticality_score: entity.criticality_score ?? 0.5, sentiment: entity.sentiment || "NEUTRAL", clearance_level: cLevel, expires_at: entity.expires_at || null, justification: entity.justification || `Extracted from Image`
@@ -322,7 +359,7 @@ app.post("/api/memory/ingest/image", async ({ body }) => {
     const job = await ingestQueue.add("ingest-image-job", {
       organizationId: orgId,
       chunks: chunks,
-      entities: entities,
+      entities: entities, // ส่งต่อให้ Queue
       relationships: formattedRelationships
     });
 
@@ -417,7 +454,7 @@ app.post("/api/memory/ingest/code", async ({ body }) => {
 
 app.post("/api/memory/chat", async ({ body }) => {
   try {
-    const { message, organizationId, summary, clearance_level } = body as any;
+    const { message, organizationId, summary, clearance_level, referenceDate } = body as any;
     if (!message) return new Response(JSON.stringify({ error: "Missing message field" }), { status: 400 });
 
     const orgId = organizationId || "org_chat_default";
@@ -428,7 +465,7 @@ app.post("/api/memory/chat", async ({ body }) => {
     await saveEpisode({ organizationId: orgId, id: episodeId, timestamp: new Date().toISOString(), source: "chat", summary: summary || "User chat interaction" });
 
     const [rawResult, chunkEmbeddings] = await Promise.all([
-      executeWithRetry(() => safeExtractGraphData(message, orgId)),
+      executeWithRetry(() => safeExtractGraphData(message, orgId, referenceDate || new Date().toISOString())),
       executeWithRetry(() => safeGenerateEmbeddings([message]))
     ]);
 
@@ -448,9 +485,28 @@ app.post("/api/memory/chat", async ({ body }) => {
     const entities = graphData.entities || [];
     const relationships = graphData.relationships || [];
 
+    // ----------------------------------------------------
+    // 🚀 แก้ไข Task 1: สร้าง Embeddings ให้ Entities ทุกตัวเพื่อทำ Deduplicate
+    // ----------------------------------------------------
+    const entityTexts = entities.map((e: any) => `${e.name} ${e.description || ''}`.trim());
+    let entityEmbeds: number[][] = [];
+    if (entityTexts.length > 0) {
+      entityEmbeds = await executeWithRetry(() => safeGenerateEmbeddings(entityTexts));
+    }
+
     for (let k = 0; k < entities.length; k++) {
       const entity = entities[k];
-      await executeWithRetry(() => saveEntity({ organizationId: orgId, id: entity.id, name: entity.name, type: entity.type.toUpperCase(), description: entity.description || "" }));
+      
+      // ✅ ส่ง embedding เข้าไปใน saveEntity ด้วย!
+      await executeWithRetry(() => saveEntity({ 
+        organizationId: orgId, 
+        id: entity.id, 
+        name: entity.name, 
+        type: entity.type.toUpperCase(), 
+        description: entity.description || "",
+        embedding: entityEmbeds[k] || [] 
+      }));
+      
       mentionedEntitiesForChunk.push({
         entity_id: entity.id, valid_from: entity.valid_from || new Date().toISOString(), valid_to: entity.valid_to || null,
         confidence_score: entity.confidence_score ?? 0.9, intent_category: entity.intent_category || "FACT", criticality_score: entity.criticality_score ?? 0.5, sentiment: entity.sentiment || "NEUTRAL", clearance_level: cLevel, expires_at: entity.expires_at || null, justification: entity.justification || `Extracted from chat`

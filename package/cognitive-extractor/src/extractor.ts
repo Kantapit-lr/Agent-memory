@@ -6,7 +6,8 @@ const openai = new OpenAI({
   baseURL: process.env.OPENAI_BASE_URL,
 });
 
-export async function extractGraphData(text: string, organizationId: string) {
+// เพิ่มพารามิเตอร์ referenceDate (ให้เป็น Optional ไปก่อน เผื่อบางทีไม่มีส่งมา)
+export async function extractGraphData(text: string, organizationId: string, referenceDate?: string) {
   if (process.env.USE_MOCK_AI === "true") {
     console.log("⚠️ [MOCK MODE] กำลังจำลองผลลัพธ์การสกัดข้อมูล...");
 
@@ -53,9 +54,14 @@ export async function extractGraphData(text: string, organizationId: string) {
     });
   }
 
+  // สร้างข้อความ Context วันที่ (ถ้ามีส่งมาให้ใช้ ถ้าไม่มีก็ปล่อยว่าง)
+  const dateContext = referenceDate 
+    ? `\n[CRITICAL CONTEXT] THE BASELINE DATE OF THIS DOCUMENT IS: ${referenceDate}. Use this date as 'now' or 'current' when interpreting relative times.\n` 
+    : "";
+
   const systemPrompt = `You are a Cognitive 4D Memory Extractor for an Enterprise Architecture.
 Extract entities and relationships from the text and output ONLY valid JSON.
-
+${dateContext}
 CRITICAL RULES:
 1. OUTPUT FORMAT: Your response must strictly match this exact JSON structure. Do NOT add extra nested keys like "properties":
 {
@@ -92,7 +98,8 @@ CRITICAL RULES:
 3. TIME EXTRACTION (Bi-temporal): Carefully extract any specific dates, years, or timeframes mentioned in the text that relate to an entity or relationship. 
    - Convert them to ISO 8601 format (e.g., "YYYY-MM-DDTHH:mm:ssZ"). 
    - If a Thai Buddhist Era (พ.ศ.) year is found (e.g., 2568, 2569), you MUST convert it to Christian Era (AD) by subtracting 543 (e.g., 2568 -> 2025). 
-   - If no specific date is mentioned for an entity or relationship, explicitly use null for valid_from and valid_to.
+   - If relative time is used (e.g., "now", "currently", "today"), use the BASELINE DATE provided above.
+   - If no specific date or relative time is implied at all, explicitly use null.
 4. EXACT 8 DIMENSIONS: Provide ALL 8 dimensions for relationships exactly as named above.
 5. INTENT CATEGORY: MUST be one of "FACT", "POLICY", "DECISION", "OPINION", or "TASK".
 6. CLEAN OUTPUT: DO NOT wrap the JSON in markdown blocks. Output ONLY raw JSON text.
